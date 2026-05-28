@@ -120,7 +120,7 @@ async function handleRefreshToken(
 export async function handleRevoke(request: Request, env: Env): Promise<Response> {
   const body = await request.formData();
   const token = body.get('token') as string | null;
-  const tokenTypeHint = body.get('token_hint_type') as string | null;
+  const tokenTypeHint = body.get('token_type_hint') as string | null;
   const clientId = body.get('client_id') as string | null;
 
   if (!token) return new Response(null, { status: 200 }); // RFC 7009 §2.2: always 200
