@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Authorize – OAuth 2.1 Provider</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center px-4">
+
+  <div class="w-full max-w-md">
+
+    <!-- Card -->
+    <div class="bg-white rounded-2xl shadow-2xl overflow-hidden">
+
+      <!-- Header banner -->
+      <div class="bg-indigo-600 px-8 py-6 text-center">
+        <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-white/20 mb-3">
+          <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" stroke-width="2"
+            viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0
+                 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332
+                 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+          </svg>
+        </div>
+        <h1 class="text-xl font-bold text-white">Authorization Request</h1>
+        <p class="text-indigo-200 text-sm mt-1">
+          Signed in as <strong class="text-white">{{USERNAME}}</strong>
+        </p>
+      </div>
+
+      <!-- Body -->
+      <div class="px-8 py-6">
+
+        <!-- App info -->
+        <div class="flex items-center gap-3 mb-6">
+          <div class="flex-shrink-0 w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
+            <svg class="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2"
+              viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9
+                   21H5a2 2 0 01-2-2V9m0 0h18" />
+            </svg>
+          </div>
+          <div>
+            <p class="text-sm font-medium text-slate-900">{{CLIENT_NAME}}</p>
+            <p class="text-xs text-slate-400 font-mono">{{CLIENT_ID}}</p>
+          </div>
+        </div>
+
+        <p class="text-sm text-slate-600 mb-4">
+          This application is requesting access to your account with the following permissions:
+        </p>
+
+        <!-- Scope list -->
+        <ul class="space-y-2 mb-6 text-sm text-slate-700">
+          {{SCOPE_ITEMS}}
+        </ul>
+
+        <!-- Roles info -->
+        <div class="rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 mb-6">
+          <p class="text-xs text-slate-500 font-medium uppercase tracking-wide mb-1">
+            Your roles (included in token)
+          </p>
+          <p class="text-sm text-slate-700">{{ROLES}}</p>
+        </div>
+
+        <!-- Actions -->
+        <form method="POST" action="/oauth/authorize" class="flex gap-3">
+          <input type="hidden" name="request_id" value="{{REQUEST_ID}}" />
+
+          <button
+            type="submit"
+            name="action"
+            value="deny"
+            class="flex-1 rounded-lg border border-slate-300 py-2.5 text-sm font-semibold
+                   text-slate-700 hover:bg-slate-50 active:scale-[0.98] transition-all
+                   focus:outline-none focus:ring-2 focus:ring-slate-300"
+          >
+            Deny
+          </button>
+
+          <button
+            type="submit"
+            name="action"
+            value="approve"
+            class="flex-1 rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white
+                   hover:bg-indigo-700 active:scale-[0.98] transition-all focus:outline-none
+                   focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2"
+          >
+            Approve
+          </button>
+        </form>
+
+      </div>
+    </div>
+
+    <p class="text-center text-slate-500 text-xs mt-4">
+      You are granting access only to the scopes listed above.
+      You can revoke access at any time.
+    </p>
+  </div>
+
+  <script>
+    // Disable both buttons after the form is submitted to prevent double-submit
+    document.querySelector('form').addEventListener('submit', function (e) {
+      const clicked = document.activeElement;
+      document.querySelectorAll('button[type="submit"]').forEach(btn => {
+        btn.disabled = true;
+      });
+      if (clicked && clicked.value === 'approve') {
+        clicked.textContent = 'Authorizing…';
+      }
+    });
+  </script>
+</body>
+</html>

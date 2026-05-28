@@ -1,0 +1,53 @@
+{
+  // Cloudflare Worker – Private OAuth 2.1 Provider
+  "name": "worker-oauth",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Static HTML / CSS / JS assets (public/ directory)
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+
+  // D1 SQLite database – users, clients, tokens, etc.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "worker-oauth-db",
+      // Replace with your actual database ID after running:
+      //   wrangler d1 create worker-oauth-db
+      "database_id": "YOUR_DATABASE_ID_HERE",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // KV namespace – sessions and ephemeral JWT key storage
+  "kv_namespaces": [
+    {
+      "binding": "SESSIONS",
+      // Replace with your actual KV namespace ID after running:
+      //   wrangler kv:namespace create SESSIONS
+      "id": "YOUR_KV_NAMESPACE_ID_HERE"
+    }
+  ],
+
+  // Public configuration variables
+  "vars": {
+    // The canonical issuer URL of this authorization server
+    "ISSUER": "https://your-worker.workers.dev",
+    // Access token lifetime in seconds
+    "TOKEN_EXPIRY": "3600",
+    // Refresh token lifetime in seconds
+    "REFRESH_TOKEN_EXPIRY": "2592000"
+  }
+
+  // Secrets (set via `wrangler secret put`):
+  //   JWT_PRIVATE_KEY  – base64-encoded JSON Web Key (RSA private, for RS256)
+  //   JWT_PUBLIC_KEY   – base64-encoded JSON Web Key (RSA public)
+  //   JWT_KID          – key ID string matching the JWK
+  //
+  // If these secrets are absent the worker auto-generates a key pair on first
+  // start and stores it in the SESSIONS KV namespace (handy for local dev).
+}
