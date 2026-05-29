@@ -23,16 +23,6 @@
     }
   ],
 
-  // KV namespace – sessions and ephemeral JWT key storage
-  "kv_namespaces": [
-    {
-      "binding": "SESSION_KV",
-      // Replace with your actual KV namespace ID after running:
-      //   wrangler kv:namespace create SESSION_KV
-      "id": "00000000000000000000000000000000"
-    }
-  ],
-
   // Public configuration variables
   "vars": {
     // The canonical issuer URL of this authorization server
