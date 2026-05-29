@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard – OAuth 2.1 Provider</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-100">
+
+  <!-- Navigation -->
+  <nav class="bg-white shadow-sm">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between h-16 items-center">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2"
+              viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1
+                   1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+            </svg>
+          </div>
+          <span class="text-lg font-semibold text-slate-900">OAuth 2.1 Provider</span>
+        </div>
+        <a href="/logout"
+          class="text-sm text-slate-600 hover:text-slate-900 font-medium transition-colors">
+          Sign out
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+
+    <!-- Loading state -->
+    <div id="loading" class="flex items-center justify-center py-20">
+      <div class="text-slate-400 text-sm animate-pulse">Loading your profile…</div>
+    </div>
+
+    <!-- Profile content (hidden until data loads) -->
+    <div id="content" class="hidden space-y-6">
+
+      <!-- User info card -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex items-center gap-5">
+        <div class="flex-shrink-0 w-16 h-16 rounded-full bg-indigo-100 flex items-center
+                    justify-center text-2xl font-bold text-indigo-600" id="avatar">?</div>
+        <div>
+          <h2 class="text-2xl font-bold text-slate-900" id="username">–</h2>
+          <p class="text-slate-500 text-sm" id="email">–</p>
+          <p class="text-slate-400 text-xs mt-0.5">
+            Member since <span id="member-since">–</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Roles card -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+        <h3 class="text-base font-semibold text-slate-900 mb-4">Assigned Roles</h3>
+        <div id="roles" class="flex flex-wrap gap-2">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <!-- JWT demo card -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+        <h3 class="text-base font-semibold text-slate-900 mb-1">Sample Access Token</h3>
+        <p class="text-sm text-slate-500 mb-5">
+          Generate a signed RS256 JWT for yourself. The token payload will contain your
+          roles and can be used to test downstream resource servers.
+        </p>
+
+        <button
+          id="generate-token-btn"
+          class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm
+                 font-semibold text-white hover:bg-indigo-700 active:scale-[0.98] transition-all
+                 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2
+                 disabled:opacity-50"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"
+            viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1
+                 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+          </svg>
+          Generate Token
+        </button>
+
+        <!-- Token display -->
+        <div id="token-display" class="hidden mt-5 space-y-4">
+
+          <div>
+            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">
+              Raw JWT
+            </p>
+            <div class="relative">
+              <pre id="raw-token"
+                class="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs
+                       text-slate-600 overflow-x-auto whitespace-pre-wrap break-all"></pre>
+              <button
+                id="copy-btn"
+                class="absolute top-2 right-2 rounded-md bg-white border border-slate-200
+                       px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 transition-colors"
+                onclick="copyToken()"
+              >Copy</button>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">
+              Decoded Payload
+            </p>
+            <pre id="decoded-payload"
+              class="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs
+                     text-slate-700 overflow-x-auto"></pre>
+          </div>
+
+        </div>
+
+        <!-- Token error -->
+        <div id="token-error"
+          class="hidden mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3
+                 text-sm text-red-700">
+          <span id="token-error-msg"></span>
+        </div>
+      </div>
+
+      <!-- OAuth flow guide -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+        <h3 class="text-base font-semibold text-slate-900 mb-4">OAuth 2.1 Quick Reference</h3>
+        <div class="space-y-3 text-sm text-slate-600">
+          <div class="flex gap-3">
+            <span class="font-mono text-xs bg-slate-100 text-slate-700 rounded px-2 py-0.5 self-start mt-0.5">GET</span>
+            <div>
+              <code class="text-indigo-600">/oauth/authorize</code>
+              <span class="text-slate-400 ml-1">– Authorization endpoint (PKCE required)</span>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="font-mono text-xs bg-emerald-100 text-emerald-700 rounded px-2 py-0.5 self-start mt-0.5">POST</span>
+            <div>
+              <code class="text-indigo-600">/oauth/token</code>
+              <span class="text-slate-400 ml-1">– Token endpoint (authorization_code &amp; refresh_token)</span>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="font-mono text-xs bg-emerald-100 text-emerald-700 rounded px-2 py-0.5 self-start mt-0.5">POST</span>
+            <div>
+              <code class="text-indigo-600">/oauth/revoke</code>
+              <span class="text-slate-400 ml-1">– Token revocation (RFC 7009)</span>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="font-mono text-xs bg-emerald-100 text-emerald-700 rounded px-2 py-0.5 self-start mt-0.5">POST</span>
+            <div>
+              <code class="text-indigo-600">/oauth/introspect</code>
+              <span class="text-slate-400 ml-1">– Token introspection (RFC 7662)</span>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="font-mono text-xs bg-slate-100 text-slate-700 rounded px-2 py-0.5 self-start mt-0.5">GET</span>
+            <div>
+              <code class="text-indigo-600">/.well-known/oauth-authorization-server</code>
+              <span class="text-slate-400 ml-1">– Discovery document</span>
+            </div>
+          </div>
+          <div class="flex gap-3">
+            <span class="font-mono text-xs bg-slate-100 text-slate-700 rounded px-2 py-0.5 self-start mt-0.5">GET</span>
+            <div>
+              <code class="text-indigo-600">/.well-known/jwks.json</code>
+              <span class="text-slate-400 ml-1">– JSON Web Key Set</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Error state -->
+    <div id="error-state" class="hidden">
+      <div class="bg-red-50 border border-red-200 rounded-2xl p-8 text-center">
+        <p class="text-red-700 mb-3" id="error-msg">Failed to load your profile.</p>
+        <a href="/login" class="text-sm text-red-600 underline hover:text-red-700">Return to login</a>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+    function show(id)  { document.getElementById(id).classList.remove('hidden'); }
+    function hide(id)  { document.getElementById(id).classList.add('hidden'); }
+
+    function formatDate(unixSeconds) {
+      return new Date(unixSeconds * 1000).toLocaleDateString(undefined, {
+        year: 'numeric', month: 'long', day: 'numeric'
+      });
+    }
+
+    function decodeJwtPayload(token) {
+      const [, payloadB64] = token.split('.');
+      const padded = payloadB64.replace(/-/g, '+').replace(/_/g, '/');
+      return JSON.parse(atob(padded));
+    }
+
+    // -----------------------------------------------------------------------
+    // Load profile via /api/me
+    // -----------------------------------------------------------------------
+    async function loadProfile() {
+      try {
+        const res = await fetch('/api/me', { credentials: 'include' });
+
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+
+        // Populate profile card
+        document.getElementById('username').textContent    = data.username;
+        document.getElementById('email').textContent       = data.email;
+        document.getElementById('member-since').textContent = formatDate(data.created_at);
+        document.getElementById('avatar').textContent =
+          data.username.charAt(0).toUpperCase();
+
+        // Roles
+        const rolesEl = document.getElementById('roles');
+        rolesEl.innerHTML = '';
+        (data.roles || []).forEach(role => {
+          const badge = document.createElement('span');
+          badge.className =
+            'inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ' +
+            (role === 'admin'
+              ? 'bg-amber-100 text-amber-800'
+              : 'bg-indigo-100 text-indigo-800');
+          badge.textContent = role;
+          rolesEl.appendChild(badge);
+        });
+        if (!data.roles || data.roles.length === 0) {
+          rolesEl.innerHTML = '<span class="text-slate-400 text-sm">No roles assigned</span>';
+        }
+
+        hide('loading');
+        show('content');
+      } catch (err) {
+        hide('loading');
+        document.getElementById('error-msg').textContent =
+          'Failed to load your profile: ' + err.message;
+        show('error-state');
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Generate sample access token via /api/token
+    // -----------------------------------------------------------------------
+    document.getElementById('generate-token-btn').addEventListener('click', async function () {
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Generating…';
+      hide('token-display');
+      hide('token-error');
+
+      try {
+        const res = await fetch('/api/token', {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const data = await res.json();
+        const payload = decodeJwtPayload(data.access_token);
+
+        document.getElementById('raw-token').textContent     = data.access_token;
+        document.getElementById('decoded-payload').textContent =
+          JSON.stringify(payload, null, 2);
+
+        show('token-display');
+      } catch (err) {
+        document.getElementById('token-error-msg').textContent =
+          'Failed to generate token: ' + err.message;
+        show('token-error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1
+                 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+          </svg>
+          Generate Token`;
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // Copy raw JWT to clipboard
+    // -----------------------------------------------------------------------
+    function copyToken() {
+      const token = document.getElementById('raw-token').textContent;
+      navigator.clipboard.writeText(token).then(() => {
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // Boot
+    // -----------------------------------------------------------------------
+    loadProfile();
+  </script>
+</body>
+</html>
