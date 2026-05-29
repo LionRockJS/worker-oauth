@@ -29,7 +29,7 @@
       "binding": "SESSIONS",
       // Replace with your actual KV namespace ID after running:
       //   wrangler kv:namespace create SESSIONS
-      "id": "8c61e0b131dd479c93170c489f267463"
+      "id": "546ca5b1d7e24dd1b69450250a486dfd"
     }
   ],
 
