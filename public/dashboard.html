@@ -63,67 +63,35 @@
         </div>
       </div>
 
-      <!-- JWT demo card -->
+      <!-- OAuth client card -->
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <h3 class="text-base font-semibold text-slate-900 mb-1">Sample Access Token</h3>
+        <h3 class="text-base font-semibold text-slate-900 mb-1">Try the OAuth Flow</h3>
         <p class="text-sm text-slate-500 mb-5">
-          Generate a signed RS256 JWT for yourself. The token payload will contain your
-          roles and can be used to test downstream resource servers.
+          Use one of the pre-registered demo clients to obtain an access token via the
+          standard authorization code + PKCE flow. Tokens are issued and stored by the
+          <code class="text-indigo-600">@cloudflare/workers-oauth-provider</code> library.
         </p>
 
-        <button
-          id="generate-token-btn"
-          class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm
-                 font-semibold text-white hover:bg-indigo-700 active:scale-[0.98] transition-all
-                 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2
-                 disabled:opacity-50"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2"
-            viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round"
-              d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1
-                 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-          </svg>
-          Generate Token
-        </button>
-
-        <!-- Token display -->
-        <div id="token-display" class="hidden mt-5 space-y-4">
-
-          <div>
-            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">
-              Raw JWT
-            </p>
-            <div class="relative">
-              <pre id="raw-token"
-                class="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs
-                       text-slate-600 overflow-x-auto whitespace-pre-wrap break-all"></pre>
-              <button
-                id="copy-btn"
-                class="absolute top-2 right-2 rounded-md bg-white border border-slate-200
-                       px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 transition-colors"
-                onclick="copyToken()"
-              >Copy</button>
-            </div>
+        <div class="space-y-3 text-sm">
+          <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
+            <p class="font-medium text-slate-800 mb-1">demo-public <span class="font-normal text-slate-400">(public client, PKCE)</span></p>
+            <p class="text-xs text-slate-500 font-mono break-all">client_id: demo-public</p>
+            <p class="text-xs text-slate-500 font-mono break-all">redirect_uri: http://localhost:3000/callback</p>
+            <p class="text-xs text-slate-400 mt-1">No client secret required. Use S256 code challenge.</p>
           </div>
-
-          <div>
-            <p class="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">
-              Decoded Payload
-            </p>
-            <pre id="decoded-payload"
-              class="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs
-                     text-slate-700 overflow-x-auto"></pre>
+          <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
+            <p class="font-medium text-slate-800 mb-1">demo-confidential <span class="font-normal text-slate-400">(confidential client)</span></p>
+            <p class="text-xs text-slate-500 font-mono break-all">client_id: demo-confidential</p>
+            <p class="text-xs text-slate-500 font-mono break-all">client_secret: super-secret-value</p>
+            <p class="text-xs text-slate-400 mt-1">Use client_secret_basic for token endpoint auth.</p>
           </div>
-
         </div>
 
-        <!-- Token error -->
-        <div id="token-error"
-          class="hidden mt-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3
-                 text-sm text-red-700">
-          <span id="token-error-msg"></span>
-        </div>
+        <p class="text-xs text-slate-400 mt-4">
+          Clients must be registered first. Run
+          <code class="text-indigo-600">POST /admin/setup-clients</code> with
+          <code class="text-indigo-600">X-Admin-Secret</code> header after deployment.
+        </p>
       </div>
 
       <!-- OAuth flow guide -->
@@ -199,12 +167,6 @@
       });
     }
 
-    function decodeJwtPayload(token) {
-      const [, payloadB64] = token.split('.');
-      const padded = payloadB64.replace(/-/g, '+').replace(/_/g, '/');
-      return JSON.parse(atob(padded));
-    }
-
     // -----------------------------------------------------------------------
     // Load profile via /api/me
     // -----------------------------------------------------------------------
@@ -252,59 +214,6 @@
           'Failed to load your profile: ' + err.message;
         show('error-state');
       }
-    }
-
-    // -----------------------------------------------------------------------
-    // Generate sample access token via /api/token
-    // -----------------------------------------------------------------------
-    document.getElementById('generate-token-btn').addEventListener('click', async function () {
-      const btn = this;
-      btn.disabled = true;
-      btn.textContent = 'Generating…';
-      hide('token-display');
-      hide('token-error');
-
-      try {
-        const res = await fetch('/api/token', {
-          method: 'POST',
-          credentials: 'include',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const data = await res.json();
-        const payload = decodeJwtPayload(data.access_token);
-
-        document.getElementById('raw-token').textContent     = data.access_token;
-        document.getElementById('decoded-payload').textContent =
-          JSON.stringify(payload, null, 2);
-
-        show('token-display');
-      } catch (err) {
-        document.getElementById('token-error-msg').textContent =
-          'Failed to generate token: ' + err.message;
-        show('token-error');
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = `
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round"
-              d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1
-                 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-          </svg>
-          Generate Token`;
-      }
-    });
-
-    // -----------------------------------------------------------------------
-    // Copy raw JWT to clipboard
-    // -----------------------------------------------------------------------
-    function copyToken() {
-      const token = document.getElementById('raw-token').textContent;
-      navigator.clipboard.writeText(token).then(() => {
-        const btn = document.getElementById('copy-btn');
-        btn.textContent = 'Copied!';
-        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
-      });
     }
 
     // -----------------------------------------------------------------------

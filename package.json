@@ -7,12 +7,15 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply worker-oauth-db --local",
-    "db:migrate": "wrangler d1 migrations apply worker-oauth-db",
+    "db:migrate": "wrangler d1 migrations apply worker-oauth-db --remote",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241022.0",
     "typescript": "^5.5.2",
     "wrangler": "^3.60.3"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.7.0"
   }
 }

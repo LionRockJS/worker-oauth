@@ -65,19 +65,9 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 /**
- * Constant-time comparison of two hex strings.
- */
-function hexEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
-
-/**
  * Verify a plaintext password against a stored `pbkdf2:…` hash.
+ * Uses crypto.subtle.timingSafeEqual (Cloudflare non-standard extension) to
+ * compare the derived bits directly, avoiding a hex round-trip.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parts = stored.split(':');
@@ -85,6 +75,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const [, saltHex, hashHex] = parts;
 
   const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
+  const expectedBytes = new Uint8Array(hashHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
 
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
@@ -100,11 +91,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
     256,
   );
 
-  const computedHex = Array.from(new Uint8Array(derivedBits))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-
-  return hexEqual(computedHex, hashHex);
+  return crypto.subtle.timingSafeEqual(new Uint8Array(derivedBits), expectedBytes);
 }
 
 /**

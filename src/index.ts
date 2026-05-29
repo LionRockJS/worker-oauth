@@ -1,111 +1,63 @@
+import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import type { Env } from './types';
-import { handleDiscovery, handleJWKS } from './handlers/discovery';
-import { handleAuthorizeGet, handleAuthorizePost } from './handlers/auth';
-import { handleToken, handleRevoke, handleIntrospect } from './handlers/token';
-import {
-  handleLogin,
-  handleRegister,
-  handleDashboard,
-  handleLogout,
-  handleApiMe,
-  handleApiToken,
-} from './handlers/ui';
+import { ApiHandler } from './handlers/api';
+import { defaultHandler } from './handlers/default';
 
 // ---------------------------------------------------------------------------
-// Main Cloudflare Worker entry point
+// OAuth 2.1 Provider – powered by @cloudflare/workers-oauth-provider
+//
+// The library handles:
+//   - POST /oauth/token          (authorization_code + refresh_token exchange)
+//   - GET  /.well-known/oauth-authorization-server  (RFC 8414 discovery)
+//   - GET  /.well-known/oauth-protected-resource    (RFC 9728 metadata)
+//   - GET  /oauth/register        (dynamic client registration, RFC 7591)
+//   - Bearer token validation on configured API routes
+//
+// We handle:
+//   - GET/POST /oauth/authorize  (consent UI)
+//   - GET/POST /login            (user authentication)
+//   - GET/POST /register         (user registration)
+//   - GET /dashboard             (first-party web UI)
+//   - GET /api/me                (session-authenticated profile API)
+//   - GET /oauth/userinfo        (OAuth-protected OIDC UserInfo)
+//   - POST /admin/setup-clients  (one-time demo client seeding)
 // ---------------------------------------------------------------------------
+
+const oauthProvider = new OAuthProvider({
+  // OAuth-token-protected routes → ApiHandler
+  apiRoute: ['/oauth/userinfo'],
+  apiHandler: ApiHandler,
+
+  // Everything else → defaultHandler
+  defaultHandler,
+
+  // Endpoints
+  authorizeEndpoint: '/oauth/authorize',
+  tokenEndpoint: '/oauth/token',
+  clientRegistrationEndpoint: '/oauth/register',
+
+  // Scopes this AS supports
+  scopesSupported: ['openid', 'profile', 'email', 'roles'],
+
+  // Security: require S256 PKCE only
+  allowPlainPKCE: false,
+
+  // Token lifetimes (library defaults: 3600s / 2592000s)
+  accessTokenTTL: 3600,
+  refreshTokenTTL: 2592000,
+});
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-    const { pathname: path } = url;
-    const method = request.method.toUpperCase();
+  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return oauthProvider.fetch(request, env, ctx);
+  },
 
-    try {
-      // ------------------------------------------------------------------
-      // CORS pre-flight for token / introspect / revoke / JWKS endpoints
-      // ------------------------------------------------------------------
-      if (method === 'OPTIONS') {
-        return new Response(null, {
-          status: 204,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-            'Access-Control-Max-Age': '86400',
-          },
-        });
-      }
-
-      // ------------------------------------------------------------------
-      // OAuth 2.1 / OpenID Connect discovery
-      // ------------------------------------------------------------------
-      if (path === '/.well-known/oauth-authorization-server' && method === 'GET') {
-        return handleDiscovery(env, url);
-      }
-      if (path === '/.well-known/jwks.json' && method === 'GET') {
-        return handleJWKS(env);
-      }
-
-      // ------------------------------------------------------------------
-      // OAuth endpoints
-      // ------------------------------------------------------------------
-      if (path === '/oauth/authorize') {
-        if (method === 'GET') return handleAuthorizeGet(request, env, url);
-        if (method === 'POST') return handleAuthorizePost(request, env, url);
-      }
-      if (path === '/oauth/token' && method === 'POST') {
-        return handleToken(request, env);
-      }
-      if (path === '/oauth/revoke' && method === 'POST') {
-        return handleRevoke(request, env);
-      }
-      if (path === '/oauth/introspect' && method === 'POST') {
-        return handleIntrospect(request, env);
-      }
-
-      // ------------------------------------------------------------------
-      // UI routes
-      // ------------------------------------------------------------------
-      if (path === '/') {
-        return Response.redirect(new URL('/dashboard', url).toString(), 302);
-      }
-      if (path === '/login') {
-        return handleLogin(request, env, url);
-      }
-      if (path === '/register') {
-        return handleRegister(request, env, url);
-      }
-      if (path === '/dashboard') {
-        return handleDashboard(request, env, url);
-      }
-      if (path === '/logout') {
-        return handleLogout(request, env, url);
-      }
-
-      // ------------------------------------------------------------------
-      // JSON API (consumed by dashboard vanilla JS)
-      // ------------------------------------------------------------------
-      if (path === '/api/me' && method === 'GET') {
-        return handleApiMe(request, env);
-      }
-      if (path === '/api/token' && method === 'POST') {
-        return handleApiToken(request, env);
-      }
-
-      // ------------------------------------------------------------------
-      // Fall-through: pass static assets to the Workers Assets binding
-      // ------------------------------------------------------------------
-      return env.ASSETS.fetch(request);
-    } catch (err) {
-      console.error('Unhandled error:', err);
-      return new Response(
-        JSON.stringify({ error: 'server_error', error_description: 'An unexpected error occurred' }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
-    }
+  // Periodic cleanup of expired tokens/grants from OAUTH_KV
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      oauthProvider.purgeExpiredData(env).then((r) => {
+        console.log('OAuth KV cleanup:', JSON.stringify(r));
+      }),
+    );
   },
 } satisfies ExportedHandler<Env>;
