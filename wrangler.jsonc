@@ -11,6 +11,28 @@
     "binding": "ASSETS"
   },
 
+  // D1 SQLite database – users, clients, tokens, etc.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "worker-oauth-db",
+      // Replace with your actual database ID after running:
+      //   wrangler d1 create worker-oauth-db
+      "database_id": "50c6588e-4530-4076-86e9-b9ec87a206ec",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // KV namespace – sessions and ephemeral JWT key storage
+  "kv_namespaces": [
+    {
+      "binding": "SESSIONS",
+      // Replace with your actual KV namespace ID after running:
+      //   wrangler kv:namespace create SESSIONS
+      "id": "8c61e0b131dd479c93170c489f267463"
+    }
+  ],
+
   // Public configuration variables
   "vars": {
     // The canonical issuer URL of this authorization server
