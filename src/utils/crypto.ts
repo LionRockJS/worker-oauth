@@ -1,3 +1,5 @@
+import { argon2id, argon2Verify } from 'hash-wasm';
+
 /**
  * Encode a string, ArrayBuffer, or Uint8Array as a base64url string.
  */
@@ -41,7 +43,6 @@ export function base64urlDecode(str: string): Uint8Array {
  * Returns a standard PHC string: `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`
  */
 export async function hashPassword(password: string): Promise<string> {
-  const { argon2id } = await import('hash-wasm');
   const salt = crypto.getRandomValues(new Uint8Array(16));
   return argon2id({
     password,
@@ -62,7 +63,6 @@ export async function hashPassword(password: string): Promise<string> {
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   // New Argon2id hashes (PHC string format)
   if (stored.startsWith('$argon2')) {
-    const { argon2Verify } = await import('hash-wasm');
     return argon2Verify({ password, hash: stored });
   }
 
