@@ -1,49 +1,42 @@
 {
-  // Cloudflare Worker – Private OAuth 2.1 Provider
-  "name": "worker-oauth",
-  "main": "src/index.ts",
-  "compatibility_date": "2024-11-01",
-  "compatibility_flags": ["nodejs_compat"],
-
-  // Static HTML / CSS / JS assets (public/ directory)
-  "assets": {
-    "directory": "./public",
-    "binding": "ASSETS",
-    // Always invoke the Worker first so template routes (/login, /register,
-    // /dashboard) are processed before static files are served.
-    "run_worker_first": true
-  },
-
-  // D1 SQLite database – users, clients, tokens, etc.
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "worker-oauth-db",
-      // Replace with your actual database ID after running:
-      //   wrangler d1 create worker-oauth-db
-      "database_id": "50c6588e-4530-4076-86e9-b9ec87a206ec",
-      "migrations_dir": "migrations"
-    }
-  ],
-
-  // KV namespaces
-  "kv_namespaces": [
-    {
-      // User sessions (HttpOnly cookie → session ID → KV)
-      "binding": "SESSIONS",
-      "id": "546ca5b1d7e24dd1b69450250a486dfd"
-    },
-    {
-      // Token storage for @cloudflare/workers-oauth-provider
-      // Created with: wrangler kv namespace create OAUTH_KV
-      "binding": "OAUTH_KV",
-      "id": "d22b4ce55d2f46e6934701a9abef72d8"
-    }
-  ],
-
-  // Public configuration variables
-  "vars": {
-    // The canonical issuer URL of this authorization server
-    "ISSUER": "https://worker-oauth.form.workers.dev"
-  }
+	// Cloudflare Worker – Private OAuth 2.1 Provider
+	"name": "worker-oauth",
+	"main": "src/index.ts",
+	"compatibility_date": "2024-11-01",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	// Static HTML / CSS / JS assets (public/ directory)
+	"assets": {
+		"directory": "./public",
+		"binding": "ASSETS",
+		// Always invoke the Worker first so template routes (/login, /register,
+		// /dashboard) are processed before static files are served.
+		"run_worker_first": true
+	},
+	// D1 SQLite database – users, clients, tokens, etc.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "worker-oauth-db",
+			"database_id": "9442bcc0-461f-4c62-acd0-c3683a72fd46",
+			"migrations_dir": "migrations"
+		}
+	],
+	// KV namespaces
+	"kv_namespaces": [
+		{
+			"binding": "SESSIONS",
+			"id": "85d02a83b4c74805a39a2cf625b0b63b"
+		},
+		{
+			"binding": "OAUTH_KV",
+			"id": "1cb29c82bc4f44a89873d5eba1ac98a0"
+		}
+	],
+	// Public configuration variables
+	"vars": {
+		// The canonical issuer URL of this authorization server
+		"ISSUER": "https://worker-oauth.form.workers.dev"
+	}
 }
