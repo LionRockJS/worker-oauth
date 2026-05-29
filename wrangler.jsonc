@@ -26,9 +26,9 @@
   // KV namespace – sessions and ephemeral JWT key storage
   "kv_namespaces": [
     {
-      "binding": "SESSIONS",
+      "binding": "SESSION_KV",
       // Replace with your actual KV namespace ID after running:
-      //   wrangler kv:namespace create SESSIONS
+      //   wrangler kv:namespace create SESSION_KV
       "id": "00000000000000000000000000000000"
     }
   ],
