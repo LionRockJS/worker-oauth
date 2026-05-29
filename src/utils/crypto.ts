@@ -1,4 +1,22 @@
-import { argon2id, argon2Verify } from 'hash-wasm';
+import setupWasm, { type ComputeHash } from 'argon2id/lib/setup.js';
+// Wrangler bundles these as pre-compiled WebAssembly.Module objects at build time.
+import simdWasm from 'argon2id/dist/simd.wasm';
+import nonSimdWasm from 'argon2id/dist/no-simd.wasm';
+
+// ---------------------------------------------------------------------------
+// Argon2id – initialised once per isolate lifetime.
+// Using the custom-loader API so wrangler's WebAssembly.Module objects are
+// passed to WebAssembly.instantiate() directly (no dynamic compilation).
+// ---------------------------------------------------------------------------
+const ARGON2_M = 19456; // memory cost in KiB (19 MiB – OWASP minimum)
+const ARGON2_T = 2;     // iterations
+const ARGON2_P = 1;     // parallelism
+const ARGON2_TAG = 32;  // output bytes
+
+const argon2idReady: Promise<ComputeHash> = setupWasm(
+  async (io) => ({ instance: await WebAssembly.instantiate(simdWasm, io) }),
+  async (io) => ({ instance: await WebAssembly.instantiate(nonSimdWasm, io) }),
+);
 
 /**
  * Encode a string, ArrayBuffer, or Uint8Array as a base64url string.
@@ -40,30 +58,52 @@ export function base64urlDecode(str: string): Uint8Array {
 
 /**
  * Hash a password with Argon2id (OWASP-recommended parameters).
- * Returns a standard PHC string: `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`
+ * Returns a PHC-style string:
+ *   `$argon2id$v=19$m=<m>,t=<t>,p=<p>$<base64url-salt>$<base64url-hash>`
  */
 export async function hashPassword(password: string): Promise<string> {
+  const fn = await argon2idReady;
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  return argon2id({
-    password,
+  const hash = fn({
+    password: new TextEncoder().encode(password),
     salt,
-    parallelism: 1,
-    iterations: 2,
-    memorySize: 19456, // 19 MiB — OWASP minimum recommendation
-    hashLength: 32,
-    outputType: 'encoded',
+    parallelism: ARGON2_P,
+    passes: ARGON2_T,
+    memorySize: ARGON2_M,
+    tagLength: ARGON2_TAG,
   });
+  return `$argon2id$v=19$m=${ARGON2_M},t=${ARGON2_T},p=${ARGON2_P}$${base64url(salt)}$${base64url(hash)}`;
 }
 
 /**
  * Verify a password against a stored hash.
- * Supports Argon2id (PHC format) for new hashes, and legacy `pbkdf2:…`
- * hashes so existing accounts continue to work until their next login.
+ * Supports the Argon2id PHC-style format produced by `hashPassword`, and the
+ * legacy `pbkdf2:…` format so existing accounts keep working until their
+ * password is next re-set.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  // New Argon2id hashes (PHC string format)
-  if (stored.startsWith('$argon2')) {
-    return argon2Verify({ password, hash: stored });
+  if (stored.startsWith('$argon2id$')) {
+    // $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>
+    const parts = stored.split('$');
+    // parts: [ '', 'argon2id', 'v=19', 'm=…,t=…,p=…', '<salt>', '<hash>' ]
+    if (parts.length !== 6) return false;
+    const paramParts = parts[3].split(',');
+    const m = parseInt(paramParts[0].slice(2), 10);
+    const t = parseInt(paramParts[1].slice(2), 10);
+    const p = parseInt(paramParts[2].slice(2), 10);
+    const salt = base64urlDecode(parts[4]);
+    const storedHash = base64urlDecode(parts[5]);
+
+    const fn = await argon2idReady;
+    const hash = fn({
+      password: new TextEncoder().encode(password),
+      salt,
+      parallelism: p,
+      passes: t,
+      memorySize: m,
+      tagLength: storedHash.length,
+    });
+    return crypto.subtle.timingSafeEqual(hash, storedHash);
   }
 
   // Legacy PBKDF2 hashes — kept for backward compatibility
