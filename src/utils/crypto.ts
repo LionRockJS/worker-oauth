@@ -37,39 +37,36 @@ export function base64urlDecode(str: string): Uint8Array {
 }
 
 /**
- * Hash a password with PBKDF2-SHA256 (100 000 iterations, random 128-bit salt).
- * Returns a compact `pbkdf2:<saltHex>:<hashHex>` string.
+ * Hash a password with Argon2id (OWASP-recommended parameters).
+ * Returns a standard PHC string: `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`
  */
 export async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
+  const { argon2id } = await import('hash-wasm');
   const salt = crypto.getRandomValues(new Uint8Array(16));
-
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(password),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
-  );
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' },
-    keyMaterial,
-    256,
-  );
-
-  const toHex = (arr: Uint8Array) =>
-    Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-
-  return `pbkdf2:${toHex(salt)}:${toHex(new Uint8Array(derivedBits))}`;
+  return argon2id({
+    password,
+    salt,
+    parallelism: 1,
+    iterations: 2,
+    memorySize: 19456, // 19 MiB — OWASP minimum recommendation
+    hashLength: 32,
+    outputType: 'encoded',
+  });
 }
 
 /**
- * Verify a plaintext password against a stored `pbkdf2:…` hash.
- * Uses crypto.subtle.timingSafeEqual (Cloudflare non-standard extension) to
- * compare the derived bits directly, avoiding a hex round-trip.
+ * Verify a password against a stored hash.
+ * Supports Argon2id (PHC format) for new hashes, and legacy `pbkdf2:…`
+ * hashes so existing accounts continue to work until their next login.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  // New Argon2id hashes (PHC string format)
+  if (stored.startsWith('$argon2')) {
+    const { argon2Verify } = await import('hash-wasm');
+    return argon2Verify({ password, hash: stored });
+  }
+
+  // Legacy PBKDF2 hashes — kept for backward compatibility
   const parts = stored.split(':');
   if (parts.length !== 3 || parts[0] !== 'pbkdf2') return false;
   const [, saltHex, hashHex] = parts;

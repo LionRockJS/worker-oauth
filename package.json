@@ -16,6 +16,7 @@
     "wrangler": "^3.60.3"
   },
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "^0.7.0"
+    "@cloudflare/workers-oauth-provider": "^0.7.0",
+    "hash-wasm": "^4.12.0"
   }
 }
