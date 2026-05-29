@@ -18,7 +18,7 @@
       "database_name": "worker-oauth-db",
       // Replace with your actual database ID after running:
       //   wrangler d1 create worker-oauth-db
-      "database_id": "YOUR_DATABASE_ID_HERE",
+      "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "migrations"
     }
   ],
@@ -29,7 +29,7 @@
       "binding": "SESSIONS",
       // Replace with your actual KV namespace ID after running:
       //   wrangler kv:namespace create SESSIONS
-      "id": "YOUR_KV_NAMESPACE_ID_HERE"
+      "id": "00000000000000000000000000000000"
     }
   ],
 
