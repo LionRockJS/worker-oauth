@@ -451,5 +451,30 @@ async function handleSetupClients(request: Request, env: Env): Promise<Response>
     results.push({ clientId: 'demo-confidential', status: `error: ${String(err)}` });
   }
 
+  // CMS client – cms.eventuai.com
+  try {
+    const existing = await env.OAUTH_PROVIDER.lookupClient('cms-eventuai');
+    if (existing) {
+      results.push({ clientId: 'cms-eventuai', status: 'already exists' });
+    } else {
+      const cmsSecret = (env as unknown as { CMS_CLIENT_SECRET?: string }).CMS_CLIENT_SECRET;
+      if (!cmsSecret) {
+        results.push({ clientId: 'cms-eventuai', status: 'error: CMS_CLIENT_SECRET secret not set' });
+      } else {
+        const c = await env.OAUTH_PROVIDER.createClient({
+          clientId: 'cms-eventuai',
+          clientSecret: cmsSecret,
+          clientName: 'Worker CMS',
+          redirectUris: ['https://cms.eventuai.com/auth/callback'],
+          grantTypes: ['authorization_code', 'refresh_token'],
+          tokenEndpointAuthMethod: 'client_secret_post',
+        });
+        results.push({ clientId: c.clientId, status: 'created' });
+      }
+    }
+  } catch (err) {
+    results.push({ clientId: 'cms-eventuai', status: `error: ${String(err)}` });
+  }
+
   return Response.json({ results });
 }
