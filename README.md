@@ -68,6 +68,13 @@ wrangler secret put ADMIN_SECRET
 # enter a strong random value when prompted
 ```
 
+Set the CMS OAuth client secret too; use the same value as the CMS Worker's
+`OAUTH_CLIENT_SECRET` secret:
+
+```sh
+wrangler secret put CMS_CLIENT_SECRET
+```
+
 ---
 
 ### 5. Update the issuer URL
@@ -76,7 +83,7 @@ In `wrangler.jsonc`, set `ISSUER` to your Worker's public URL:
 
 ```jsonc
 "vars": {
-  "ISSUER": "https://worker-oauth.<your-subdomain>.workers.dev"
+  "ISSUER": "https://id.eventuai.com"
 }
 ```
 
@@ -106,14 +113,18 @@ npm run deploy
 
 ---
 
-### 8. Seed demo OAuth clients (optional)
+### 8. Seed the CMS OAuth client
 
-After deploying, seed two demo clients (a public PKCE client and a confidential client):
+After deploying, seed or update the CMS OAuth client:
 
 ```sh
-curl -X POST https://worker-oauth.<your-subdomain>.workers.dev/admin/setup-clients \
+curl -X POST https://id.eventuai.com/admin/setup-clients \
   -H "X-Admin-Secret: <your-ADMIN_SECRET>"
 ```
+
+Demo clients are skipped by default in production. To seed them intentionally,
+set `ALLOW_DEMO_CLIENTS=true`; set `DEMO_CONFIDENTIAL_CLIENT_SECRET` before
+creating `demo-confidential`.
 
 ---
 
@@ -136,9 +147,8 @@ npm run dev                # starts wrangler dev on http://localhost:8787
 | `GET/POST` | `/oauth/authorize` | Authorization / consent UI |
 | `POST` | `/oauth/token` | Token endpoint |
 | `GET` | `/oauth/userinfo` | OIDC UserInfo (Bearer token required) |
-| `GET` | `/oauth/register` | Dynamic client registration (RFC 7591) |
 | `GET` | `/.well-known/oauth-authorization-server` | RFC 8414 discovery |
-| `POST` | `/admin/setup-clients` | One-time demo client seeding (`X-Admin-Secret` header) |
+| `POST` | `/admin/setup-clients` | CMS client seeding (`X-Admin-Secret` header) |
 
 ## Supported scopes
 

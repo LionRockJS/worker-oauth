@@ -67,28 +67,21 @@
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
         <h3 class="text-base font-semibold text-slate-900 mb-1">Try the OAuth Flow</h3>
         <p class="text-sm text-slate-500 mb-5">
-          Use one of the pre-registered demo clients to obtain an access token via the
+          Production clients are registered by the protected setup endpoint and use the
           standard authorization code + PKCE flow. Tokens are issued and stored by the
           <code class="text-indigo-600">@cloudflare/workers-oauth-provider</code> library.
         </p>
 
         <div class="space-y-3 text-sm">
           <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
-            <p class="font-medium text-slate-800 mb-1">demo-public <span class="font-normal text-slate-400">(public client, PKCE)</span></p>
-            <p class="text-xs text-slate-500 font-mono break-all">client_id: demo-public</p>
-            <p class="text-xs text-slate-500 font-mono break-all">redirect_uri: http://localhost:3000/callback</p>
-            <p class="text-xs text-slate-400 mt-1">No client secret required. Use S256 code challenge.</p>
-          </div>
-          <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
-            <p class="font-medium text-slate-800 mb-1">demo-confidential <span class="font-normal text-slate-400">(confidential client)</span></p>
-            <p class="text-xs text-slate-500 font-mono break-all">client_id: demo-confidential</p>
-            <p class="text-xs text-slate-500 font-mono break-all">client_secret: super-secret-value</p>
-            <p class="text-xs text-slate-400 mt-1">Use client_secret_basic for token endpoint auth.</p>
+            <p class="font-medium text-slate-800 mb-1">Worker CMS <span class="font-normal text-slate-400">(confidential client)</span></p>
+            <p class="text-xs text-slate-500 font-mono break-all">redirect_uri: https://cms.eventuai.com/auth/callback</p>
+            <p class="text-xs text-slate-400 mt-1">Uses client_secret_post with a secret stored in Wrangler, never in source.</p>
           </div>
         </div>
 
         <p class="text-xs text-slate-400 mt-4">
-          Clients must be registered first. Run
+          The CMS client must be registered first. Run
           <code class="text-indigo-600">POST /admin/setup-clients</code> with
           <code class="text-indigo-600">X-Admin-Secret</code> header after deployment.
         </p>

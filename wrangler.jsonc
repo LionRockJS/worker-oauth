@@ -37,6 +37,6 @@
 	// Public configuration variables
 	"vars": {
 		// The canonical issuer URL of this authorization server
-		"ISSUER": "https://worker-oauth.form.workers.dev"
+		"ISSUER": "https://id.eventuai.com"
 	}
 }

@@ -17,6 +17,7 @@ import {
   buildClearCookieHeader,
 } from './session';
 import { loadTemplate, htmlResponse, escapeHtml } from './ui';
+import { rejectCrossOriginMutation, timingSafeEqualStrings } from '../utils/security';
 
 // ---------------------------------------------------------------------------
 // Scope descriptions shown on the consent page
@@ -28,6 +29,9 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
   email: 'Read your email address',
   roles: 'Read your account roles',
 };
+
+const LOGIN_RATE_LIMIT_TTL = 15 * 60;
+const MAX_FAILED_LOGINS = 8;
 
 // ---------------------------------------------------------------------------
 // Default handler – handles all non-API, non-token-endpoint routes
@@ -52,6 +56,9 @@ export const defaultHandler = {
           },
         });
       }
+
+      const crossOriginMutation = rejectCrossOriginMutation(request);
+      if (crossOriginMutation) return crossOriginMutation;
 
       // Redirect root → dashboard
       if (path === '/') {
@@ -136,7 +143,7 @@ async function handleAuthorizeGet(request: Request, env: Env, url: URL): Promise
   const client = await env.OAUTH_PROVIDER.lookupClient(oauthReqInfo.clientId);
   if (!client) {
     return htmlResponse(
-      `<h1>Unknown client</h1><p>Client <code>${escapeHtml(oauthReqInfo.clientId)}</code> is not registered. Register it first via <code>POST /oauth/register</code> or <code>POST /admin/setup-clients</code>.</p>`,
+      `<h1>Unknown client</h1><p>Client <code>${escapeHtml(oauthReqInfo.clientId)}</code> is not registered.</p>`,
       400,
     );
   }
@@ -259,10 +266,18 @@ async function handleLogin(request: Request, env: Env, url: URL): Promise<Respon
 
   if (!username || !password) return renderError('Username and password are required.');
 
+  const rateLimitKey = await getLoginRateLimitKey(request, username);
+  const failedAttempts = await getFailedLoginCount(env.SESSIONS, rateLimitKey);
+  if (failedAttempts >= MAX_FAILED_LOGINS) {
+    return renderError('Too many failed attempts. Please try again later.');
+  }
+
   const user = await getUserByUsername(env.DB, username);
   if (!user || !(await verifyPassword(password, user.password_hash))) {
+    await recordFailedLogin(env.SESSIONS, rateLimitKey, failedAttempts);
     return renderError('Invalid username or password.');
   }
+  await clearFailedLogins(env.SESSIONS, rateLimitKey);
 
   const sessionId = await createSession(env.SESSIONS, {
     userId: user.id,
@@ -388,72 +403,92 @@ async function handleApiMe(request: Request, env: Env): Promise<Response> {
 
   const roles = await getUserRoles(env.DB, user.id);
 
-  return Response.json({
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    roles,
-    created_at: user.created_at,
-  });
+  return Response.json(
+    {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      roles,
+      created_at: user.created_at,
+    },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }
 
 // ---------------------------------------------------------------------------
-// POST /admin/setup-clients – one-time seeding of demo OAuth clients
+// POST /admin/setup-clients – protected seeding of the CMS OAuth client
 //   Requires header: X-Admin-Secret matching env.ADMIN_SECRET (wrangler secret)
 // ---------------------------------------------------------------------------
 
 async function handleSetupClients(request: Request, env: Env): Promise<Response> {
-  const adminSecret = (env as unknown as { ADMIN_SECRET?: string }).ADMIN_SECRET;
+  const adminSecret = env.ADMIN_SECRET;
   const provided = request.headers.get('X-Admin-Secret');
 
-  if (!adminSecret || provided !== adminSecret) {
+  if (!adminSecret || !provided || !(await timingSafeEqualStrings(provided, adminSecret))) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const results: Array<{ clientId: string; clientSecret?: string; status: string }> = [];
+  const results: Array<{ clientId: string; status: string }> = [];
+  const allowDemoClients = env.ALLOW_DEMO_CLIENTS === 'true';
 
   // Demo public client (SPA / CLI – no secret, PKCE required)
-  try {
-    const existing = await env.OAUTH_PROVIDER.lookupClient('demo-public');
-    if (existing) {
-      results.push({ clientId: 'demo-public', status: 'already exists' });
-    } else {
-      const c = await env.OAUTH_PROVIDER.createClient({
-        clientId: 'demo-public',
-        clientName: 'Demo Public Client',
-        redirectUris: ['http://localhost:3000/callback', 'https://oauthdebugger.com/debug'],
-        grantTypes: ['authorization_code', 'refresh_token'],
-        tokenEndpointAuthMethod: 'none',
-      });
-      results.push({ clientId: c.clientId, status: 'created' });
+  if (allowDemoClients) {
+    try {
+      const existing = await env.OAUTH_PROVIDER.lookupClient('demo-public');
+      if (existing) {
+        results.push({ clientId: 'demo-public', status: 'already exists' });
+      } else {
+        const c = await env.OAUTH_PROVIDER.createClient({
+          clientId: 'demo-public',
+          clientName: 'Demo Public Client',
+          redirectUris: ['http://localhost:3000/callback', 'https://oauthdebugger.com/debug'],
+          grantTypes: ['authorization_code', 'refresh_token'],
+          tokenEndpointAuthMethod: 'none',
+        });
+        results.push({ clientId: c.clientId, status: 'created' });
+      }
+    } catch (err) {
+      results.push({ clientId: 'demo-public', status: `error: ${String(err)}` });
     }
-  } catch (err) {
-    results.push({ clientId: 'demo-public', status: `error: ${String(err)}` });
+  } else {
+    await deleteClientIfPresent(env, 'demo-public');
+    results.push({ clientId: 'demo-public', status: 'deleted/skipped; set ALLOW_DEMO_CLIENTS=true to seed demo clients' });
   }
 
   // Demo confidential client (server-side app – has client secret)
-  try {
-    const existing = await env.OAUTH_PROVIDER.lookupClient('demo-confidential');
-    if (existing) {
-      results.push({ clientId: 'demo-confidential', status: 'already exists' });
-    } else {
-      const c = await env.OAUTH_PROVIDER.createClient({
-        clientId: 'demo-confidential',
-        clientSecret: 'super-secret-value',
-        clientName: 'Demo Confidential Client',
-        redirectUris: ['http://localhost:3000/callback', 'https://oauthdebugger.com/debug'],
-        grantTypes: ['authorization_code', 'refresh_token'],
-        tokenEndpointAuthMethod: 'client_secret_basic',
-      });
-      results.push({ clientId: c.clientId, clientSecret: c.clientSecret, status: 'created' });
+  if (allowDemoClients) {
+    try {
+      const demoSecret = env.DEMO_CONFIDENTIAL_CLIENT_SECRET;
+      if (!demoSecret) {
+        results.push({ clientId: 'demo-confidential', status: 'error: DEMO_CONFIDENTIAL_CLIENT_SECRET secret not set' });
+      } else {
+        const existing = await env.OAUTH_PROVIDER.lookupClient('demo-confidential');
+        if (existing) {
+          await env.OAUTH_PROVIDER.updateClient(existing.clientId, { clientSecret: demoSecret });
+          results.push({ clientId: 'demo-confidential', status: 'secret updated' });
+        } else {
+          const c = await env.OAUTH_PROVIDER.createClient({
+            clientId: 'demo-confidential',
+            clientSecret: demoSecret,
+            clientName: 'Demo Confidential Client',
+            redirectUris: ['http://localhost:3000/callback', 'https://oauthdebugger.com/debug'],
+            grantTypes: ['authorization_code', 'refresh_token'],
+            tokenEndpointAuthMethod: 'client_secret_basic',
+          });
+          results.push({ clientId: c.clientId, status: 'created' });
+        }
+      }
+    } catch (err) {
+      results.push({ clientId: 'demo-confidential', status: `error: ${String(err)}` });
     }
-  } catch (err) {
-    results.push({ clientId: 'demo-confidential', status: `error: ${String(err)}` });
+  } else {
+    await deleteClientIfPresent(env, 'demo-confidential');
+    results.push({ clientId: 'demo-confidential', status: 'deleted/skipped; set ALLOW_DEMO_CLIENTS=true to seed demo clients' });
   }
 
   // CMS client – cms.eventuai.com
   try {
-    const cmsSecret = (env as unknown as { CMS_CLIENT_SECRET?: string }).CMS_CLIENT_SECRET;
+    const cmsSecret = env.CMS_CLIENT_SECRET;
     if (!cmsSecret) {
       results.push({ clientId: 'cms-eventuai', status: 'error: CMS_CLIENT_SECRET secret not set' });
     } else {
@@ -461,8 +496,14 @@ async function handleSetupClients(request: Request, env: Env): Promise<Response>
       const all = await env.OAUTH_PROVIDER.listClients({ limit: 100 });
       const existing = all.items.find((c) => c.clientName === 'Worker CMS');
       if (existing) {
-        await env.OAUTH_PROVIDER.updateClient(existing.clientId, { clientSecret: cmsSecret });
-        results.push({ clientId: existing.clientId, status: 'secret updated' });
+        await env.OAUTH_PROVIDER.updateClient(existing.clientId, {
+          clientName: 'Worker CMS',
+          redirectUris: ['https://cms.eventuai.com/auth/callback'],
+          grantTypes: ['authorization_code', 'refresh_token'],
+          tokenEndpointAuthMethod: 'client_secret_post',
+          clientSecret: cmsSecret,
+        });
+        results.push({ clientId: existing.clientId, status: 'updated' });
       } else {
         const c = await env.OAUTH_PROVIDER.createClient({
           clientName: 'Worker CMS',
@@ -479,4 +520,32 @@ async function handleSetupClients(request: Request, env: Env): Promise<Response>
   }
 
   return Response.json({ results });
+}
+
+async function getLoginRateLimitKey(request: Request, username: string): Promise<string> {
+  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? 'unknown';
+  const material = `${ip}:${username.toLowerCase()}`;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material));
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return `login_fail:${hex}`;
+}
+
+async function getFailedLoginCount(kv: KVNamespace, key: string): Promise<number> {
+  const value = await kv.get(key);
+  return value ? parseInt(value, 10) || 0 : 0;
+}
+
+async function recordFailedLogin(kv: KVNamespace, key: string, previousCount: number): Promise<void> {
+  await kv.put(key, String(previousCount + 1), { expirationTtl: LOGIN_RATE_LIMIT_TTL });
+}
+
+async function clearFailedLogins(kv: KVNamespace, key: string): Promise<void> {
+  await kv.delete(key);
+}
+
+async function deleteClientIfPresent(env: Env, clientId: string): Promise<void> {
+  const existing = await env.OAUTH_PROVIDER.lookupClient(clientId);
+  if (existing) await env.OAUTH_PROVIDER.deleteClient(existing.clientId);
 }

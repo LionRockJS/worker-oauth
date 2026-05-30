@@ -114,33 +114,3 @@ CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires
 INSERT OR IGNORE INTO roles (id, name, description) VALUES
   ('role_admin', 'admin', 'Full administrative access'),
   ('role_user',  'user',  'Standard authenticated user');
-
--- Demo public client (PKCE required, no secret)
-INSERT OR IGNORE INTO clients
-  (id, client_id, client_secret, name, redirect_uris,
-   grant_types, scopes, token_endpoint_auth_method, require_pkce)
-VALUES
-  ('client_demo_public',
-   'demo-public',
-   NULL,
-   'Demo Public Client',
-   '["http://localhost:3000/callback","https://example.com/callback"]',
-   '["authorization_code","refresh_token"]',
-   '["openid","profile","email","roles"]',
-   'none',
-   1);
-
--- Demo confidential client (has a secret)
-INSERT OR IGNORE INTO clients
-  (id, client_id, client_secret, name, redirect_uris,
-   grant_types, scopes, token_endpoint_auth_method, require_pkce)
-VALUES
-  ('client_demo_confidential',
-   'demo-confidential',
-   'super-secret-value',
-   'Demo Confidential Client',
-   '["http://localhost:4000/callback"]',
-   '["authorization_code","refresh_token"]',
-   '["openid","profile","email","roles"]',
-   'client_secret_basic',
-   1);

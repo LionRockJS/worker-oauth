@@ -19,6 +19,16 @@ export interface Env {
   // ---- Public variables (wrangler.jsonc > vars) ----
   /** Canonical issuer URL, e.g. https://auth.example.com */
   ISSUER: string;
+
+  // ---- Secrets / deploy-time flags ----
+  /** Protects POST /admin/setup-clients */
+  ADMIN_SECRET?: string;
+  /** Client secret shared with cms.eventuai.com */
+  CMS_CLIENT_SECRET?: string;
+  /** Set to "true" only when demo OAuth clients should be seeded */
+  ALLOW_DEMO_CLIENTS?: string;
+  /** Required when ALLOW_DEMO_CLIENTS is true and demo-confidential is seeded */
+  DEMO_CONFIDENTIAL_CLIENT_SECRET?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -103,15 +103,26 @@
   </div>
 
   <script>
-    // Disable both buttons after the form is submitted to prevent double-submit
+    // Disable both buttons after the form is submitted to prevent double-submit.
+    // We capture the clicked button's value in a hidden input BEFORE disabling,
+    // because disabled buttons are excluded from form data.
     document.querySelector('form').addEventListener('submit', function (e) {
       const clicked = document.activeElement;
+      if (clicked && clicked.name === 'action') {
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'action';
+        hidden.value = clicked.value;
+        this.appendChild(hidden);
+        // Remove name from the button so it isn't submitted twice
+        clicked.removeAttribute('name');
+        if (clicked.value === 'approve') {
+          clicked.textContent = 'Authorizing…';
+        }
+      }
       document.querySelectorAll('button[type="submit"]').forEach(btn => {
         btn.disabled = true;
       });
-      if (clicked && clicked.value === 'approve') {
-        clicked.textContent = 'Authorizing…';
-      }
     });
   </script>
 </body>

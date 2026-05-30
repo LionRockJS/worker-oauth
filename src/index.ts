@@ -2,6 +2,7 @@ import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import type { Env } from './types';
 import { ApiHandler } from './handlers/api';
 import { defaultHandler } from './handlers/default';
+import { canonicalHostResponse, withSecurityHeaders } from './utils/security';
 
 // ---------------------------------------------------------------------------
 // OAuth 2.1 Provider – powered by @cloudflare/workers-oauth-provider
@@ -10,7 +11,6 @@ import { defaultHandler } from './handlers/default';
 //   - POST /oauth/token          (authorization_code + refresh_token exchange)
 //   - GET  /.well-known/oauth-authorization-server  (RFC 8414 discovery)
 //   - GET  /.well-known/oauth-protected-resource    (RFC 9728 metadata)
-//   - GET  /oauth/register        (dynamic client registration, RFC 7591)
 //   - Bearer token validation on configured API routes
 //
 // We handle:
@@ -20,7 +20,7 @@ import { defaultHandler } from './handlers/default';
 //   - GET /dashboard             (first-party web UI)
 //   - GET /api/me                (session-authenticated profile API)
 //   - GET /oauth/userinfo        (OAuth-protected OIDC UserInfo)
-//   - POST /admin/setup-clients  (one-time demo client seeding)
+//   - POST /admin/setup-clients  (protected client seeding)
 // ---------------------------------------------------------------------------
 
 const oauthProvider = new OAuthProvider({
@@ -34,7 +34,6 @@ const oauthProvider = new OAuthProvider({
   // Endpoints
   authorizeEndpoint: '/oauth/authorize',
   tokenEndpoint: '/oauth/token',
-  clientRegistrationEndpoint: '/oauth/register',
 
   // Scopes this AS supports
   scopesSupported: ['openid', 'profile', 'email', 'roles'],
@@ -48,8 +47,11 @@ const oauthProvider = new OAuthProvider({
 });
 
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return oauthProvider.fetch(request, env, ctx);
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const canonicalResponse = canonicalHostResponse(request, env.ISSUER);
+    if (canonicalResponse) return withSecurityHeaders(canonicalResponse);
+
+    return withSecurityHeaders(await oauthProvider.fetch(request, env, ctx));
   },
 
   // Periodic cleanup of expired tokens/grants from OAUTH_KV
