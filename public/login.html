@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sign In – OAuth 2.1 Provider</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.google.com/recaptcha/enterprise.js?render={{RECAPTCHA_SITE_KEY}}"></script>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center px-4">
 
@@ -35,6 +36,7 @@
       <form id="login-form" method="POST" action="/login" class="space-y-5">
         <!-- Carry the OAuth auth_request through login -->
         <input type="hidden" name="auth_request_id" value="{{AUTH_REQUEST_ID}}" />
+        <input type="hidden" id="recaptcha-token" name="recaptcha_token" />
 
         <div>
           <label for="username" class="block text-sm font-medium text-slate-700 mb-1">
@@ -73,9 +75,12 @@
         <button
           type="submit"
           id="submit-btn"
-          class="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white
+          class="g-recaptcha w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white
                  hover:bg-indigo-700 active:scale-[0.98] transition-all focus:outline-none
                  focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 disabled:opacity-50"
+          data-sitekey="{{RECAPTCHA_SITE_KEY}}"
+          data-callback="onSubmit"
+          data-action="submit"
         >
           Sign in
         </button>
@@ -89,17 +94,54 @@
   </div>
 
   <script>
+    const recaptchaSiteKey = '{{RECAPTCHA_SITE_KEY}}';
+
     // Show server-side error if present
     const errorText = document.getElementById('error-text').textContent.trim();
     if (errorText) {
       document.getElementById('error-banner').classList.remove('hidden');
     }
 
-    // Disable submit while posting to prevent double-submit
-    document.getElementById('login-form').addEventListener('submit', function () {
+    function showClientError(message) {
+      document.getElementById('error-text').textContent = message;
+      document.getElementById('error-banner').classList.remove('hidden');
+    }
+
+    function setSubmitting(isSubmitting, label) {
       const btn = document.getElementById('submit-btn');
-      btn.disabled = true;
-      btn.textContent = 'Signing in…';
+      btn.disabled = isSubmitting;
+      btn.textContent = label;
+    }
+
+    function onSubmit(token) {
+      document.getElementById('recaptcha-token').value = token;
+      setSubmitting(true, 'Signing in…');
+      document.getElementById('login-form').submit();
+    }
+
+    document.getElementById('login-form').addEventListener('submit', function (event) {
+      if (document.getElementById('recaptcha-token').value) {
+        setSubmitting(true, 'Signing in…');
+        return;
+      }
+
+      event.preventDefault();
+      setSubmitting(true, 'Checking…');
+
+      if (!window.grecaptcha || !window.grecaptcha.enterprise) {
+        setSubmitting(false, 'Sign in');
+        showClientError('reCAPTCHA is still loading. Please try again.');
+        return;
+      }
+
+      window.grecaptcha.enterprise.ready(function () {
+        window.grecaptcha.enterprise.execute(recaptchaSiteKey, { action: 'submit' })
+          .then(onSubmit)
+          .catch(function () {
+            setSubmitting(false, 'Sign in');
+            showClientError('reCAPTCHA verification could not start. Please try again.');
+          });
+      });
     });
   </script>
 </body>

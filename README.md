@@ -59,7 +59,7 @@ Copy each `id` from the output into `wrangler.jsonc`:
 
 ---
 
-### 4. Set the admin secret
+### 4. Set required secrets
 
 The `POST /admin/setup-clients` endpoint is protected by a secret you set here:
 
@@ -77,15 +77,29 @@ wrangler secret put CMS_CLIENT_SECRET
 
 ---
 
-### 5. Update the issuer URL
+### 5. Update public configuration
 
-In `wrangler.jsonc`, set `ISSUER` to your Worker's public URL:
+In `wrangler.jsonc`, set `ISSUER` to your Worker's public URL and configure
+the reCAPTCHA Enterprise site key used by `/login`:
 
 ```jsonc
 "vars": {
-  "ISSUER": "https://id.eventuai.com"
+  "ISSUER": "https://id.eventuai.com",
+  "RECAPTCHA_SITE_KEY": "6LfhfwQtAAAAACRmsenmnvRlj6eNikByvdpDi_8J",
+  "RECAPTCHA_PROJECT_ID": "<google-cloud-project-id>",
+  "RECAPTCHA_MIN_SCORE": "0.5"
 }
 ```
+
+The site key and project ID are not secrets. Store the Google Cloud API key
+used to create reCAPTCHA assessments as a Worker secret:
+
+```sh
+wrangler secret put RECAPTCHA_API_KEY
+```
+
+`POST /login` fails closed if `RECAPTCHA_PROJECT_ID` or
+`RECAPTCHA_API_KEY` is missing.
 
 ---
 

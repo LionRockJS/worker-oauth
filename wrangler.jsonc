@@ -37,6 +37,11 @@
 	// Public configuration variables
 	"vars": {
 		// The canonical issuer URL of this authorization server
-		"ISSUER": "https://id.eventuai.com"
+		"ISSUER": "https://id.eventuai.com",
+		// Public reCAPTCHA Enterprise site key used by /login
+		"RECAPTCHA_SITE_KEY": "6LfhfwQtAAAAACRmsenmnvRlj6eNikByvdpDi_8J",
+		// Set this to the Google Cloud project ID that owns the site key before deploy.
+		// "RECAPTCHA_PROJECT_ID": "your-google-cloud-project-id",
+		"RECAPTCHA_MIN_SCORE": "0.5"
 	}
 }

@@ -19,10 +19,18 @@ export interface Env {
   // ---- Public variables (wrangler.jsonc > vars) ----
   /** Canonical issuer URL, e.g. https://auth.example.com */
   ISSUER: string;
+  /** Public reCAPTCHA Enterprise site key used on the login page */
+  RECAPTCHA_SITE_KEY: string;
+  /** Google Cloud project ID that owns the reCAPTCHA Enterprise key */
+  RECAPTCHA_PROJECT_ID?: string;
+  /** Minimum accepted reCAPTCHA risk score, defaults to 0.5 */
+  RECAPTCHA_MIN_SCORE?: string;
 
   // ---- Secrets / deploy-time flags ----
   /** Protects POST /admin/setup-clients */
   ADMIN_SECRET?: string;
+  /** Google reCAPTCHA Enterprise assessment API key */
+  RECAPTCHA_API_KEY?: string;
   /** Client secret shared with cms.eventuai.com */
   CMS_CLIENT_SECRET?: string;
   /** Set to "true" only when demo OAuth clients should be seeded */

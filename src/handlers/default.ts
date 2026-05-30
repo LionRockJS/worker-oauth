@@ -32,6 +32,25 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
 
 const LOGIN_RATE_LIMIT_TTL = 15 * 60;
 const MAX_FAILED_LOGINS = 8;
+const RECAPTCHA_ACTION = 'submit';
+const DEFAULT_RECAPTCHA_MIN_SCORE = 0.5;
+
+type RecaptchaVerification =
+  | { ok: true }
+  | { ok: false; message: string; countFailedLogin?: boolean };
+
+interface RecaptchaAssessmentResponse {
+  tokenProperties?: {
+    valid?: boolean;
+    action?: string;
+    hostname?: string;
+    invalidReason?: string;
+  };
+  riskAnalysis?: {
+    score?: number | string;
+    reasons?: string[];
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Default handler – handles all non-API, non-token-endpoint routes
@@ -244,10 +263,7 @@ async function handleLogin(request: Request, env: Env, url: URL): Promise<Respon
   const authRequestId = url.searchParams.get('auth_request');
 
   if (request.method === 'GET') {
-    const html = await loadTemplate(env, '/login.html');
-    return htmlResponse(
-      html.replace('{{ERROR}}', '').replace('{{AUTH_REQUEST_ID}}', authRequestId ?? ''),
-    );
+    return renderLoginPage(env, '', authRequestId ?? '');
   }
 
   // POST
@@ -255,13 +271,11 @@ async function handleLogin(request: Request, env: Env, url: URL): Promise<Respon
   const username = (form.get('username') as string | null)?.trim() ?? '';
   const password = (form.get('password') as string | null) ?? '';
   const authReqId = (form.get('auth_request_id') as string | null) ?? '';
+  const recaptchaToken =
+    getFormString(form, 'recaptcha_token') || getFormString(form, 'g-recaptcha-response');
 
   const renderError = async (msg: string): Promise<Response> => {
-    const html = await loadTemplate(env, '/login.html');
-    return htmlResponse(
-      html.replace('{{ERROR}}', escapeHtml(msg)).replace('{{AUTH_REQUEST_ID}}', authReqId),
-      401,
-    );
+    return renderLoginPage(env, msg, authReqId, 401);
   };
 
   if (!username || !password) return renderError('Username and password are required.');
@@ -270,6 +284,12 @@ async function handleLogin(request: Request, env: Env, url: URL): Promise<Respon
   const failedAttempts = await getFailedLoginCount(env.SESSIONS, rateLimitKey);
   if (failedAttempts >= MAX_FAILED_LOGINS) {
     return renderError('Too many failed attempts. Please try again later.');
+  }
+
+  const recaptcha = await verifyRecaptcha(request, env, recaptchaToken, RECAPTCHA_ACTION);
+  if (!recaptcha.ok) {
+    if (recaptcha.countFailedLogin) await recordFailedLogin(env.SESSIONS, rateLimitKey, failedAttempts);
+    return renderError(recaptcha.message);
   }
 
   const user = await getUserByUsername(env.DB, username);
@@ -299,6 +319,138 @@ async function handleLogin(request: Request, env: Env, url: URL): Promise<Respon
 
   headers.set('Location', '/dashboard');
   return new Response(null, { status: 302, headers });
+}
+
+async function renderLoginPage(
+  env: Env,
+  error: string,
+  authRequestId: string,
+  status = 200,
+): Promise<Response> {
+  const html = await loadTemplate(env, '/login.html');
+  const siteKey = escapeHtml(env.RECAPTCHA_SITE_KEY ?? '');
+  return htmlResponse(
+    html
+      .replaceAll('{{RECAPTCHA_SITE_KEY}}', siteKey)
+      .replace('{{ERROR}}', escapeHtml(error))
+      .replace('{{AUTH_REQUEST_ID}}', escapeHtml(authRequestId)),
+    status,
+  );
+}
+
+async function verifyRecaptcha(
+  request: Request,
+  env: Env,
+  token: string,
+  expectedAction: string,
+): Promise<RecaptchaVerification> {
+  if (!token) {
+    return {
+      ok: false,
+      message: 'Please complete the reCAPTCHA verification.',
+      countFailedLogin: true,
+    };
+  }
+
+  const siteKey = env.RECAPTCHA_SITE_KEY?.trim();
+  const projectId = env.RECAPTCHA_PROJECT_ID?.trim();
+  const apiKey = env.RECAPTCHA_API_KEY?.trim();
+  if (!siteKey || !projectId || !apiKey) {
+    console.error('reCAPTCHA verification is not configured.');
+    return { ok: false, message: 'reCAPTCHA is not configured. Please try again later.' };
+  }
+
+  const endpoint = new URL(
+    `https://recaptchaenterprise.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/assessments`,
+  );
+  endpoint.searchParams.set('key', apiKey);
+
+  let assessment: RecaptchaAssessmentResponse;
+  try {
+    const response = await fetch(endpoint.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        event: {
+          token,
+          siteKey,
+          expectedAction,
+          userAgent: request.headers.get('User-Agent') ?? undefined,
+          userIpAddress: request.headers.get('CF-Connecting-IP') ?? undefined,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('reCAPTCHA assessment failed:', response.status);
+      return { ok: false, message: 'Could not verify reCAPTCHA. Please try again.' };
+    }
+
+    assessment = (await response.json()) as RecaptchaAssessmentResponse;
+  } catch (err) {
+    console.error('reCAPTCHA assessment error:', err);
+    return { ok: false, message: 'Could not verify reCAPTCHA. Please try again.' };
+  }
+
+  const tokenProperties = assessment.tokenProperties;
+  if (!tokenProperties?.valid) {
+    console.warn('reCAPTCHA token invalid:', tokenProperties?.invalidReason ?? 'unknown');
+    return {
+      ok: false,
+      message: 'reCAPTCHA verification failed. Please try again.',
+      countFailedLogin: true,
+    };
+  }
+
+  if (tokenProperties.action !== expectedAction) {
+    console.warn('reCAPTCHA action mismatch:', tokenProperties.action ?? 'missing');
+    return {
+      ok: false,
+      message: 'reCAPTCHA verification failed. Please try again.',
+      countFailedLogin: true,
+    };
+  }
+
+  const requestHostname = new URL(request.url).hostname.toLowerCase();
+  const recaptchaHostname = tokenProperties.hostname?.toLowerCase();
+  if (!recaptchaHostname || recaptchaHostname !== requestHostname) {
+    console.warn('reCAPTCHA hostname mismatch:', recaptchaHostname ?? 'missing');
+    return {
+      ok: false,
+      message: 'reCAPTCHA verification failed. Please try again.',
+      countFailedLogin: true,
+    };
+  }
+
+  const score = parseRecaptchaScore(assessment.riskAnalysis?.score);
+  if (score === null || score < getRecaptchaMinScore(env)) {
+    console.warn('reCAPTCHA score below threshold:', score ?? 'missing');
+    return {
+      ok: false,
+      message: 'reCAPTCHA verification failed. Please try again.',
+      countFailedLogin: true,
+    };
+  }
+
+  return { ok: true };
+}
+
+function parseRecaptchaScore(score: number | string | undefined): number | null {
+  const parsed = typeof score === 'string' ? Number(score) : score;
+  return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null;
+}
+
+function getRecaptchaMinScore(env: Env): number {
+  const configured = env.RECAPTCHA_MIN_SCORE ? Number(env.RECAPTCHA_MIN_SCORE) : DEFAULT_RECAPTCHA_MIN_SCORE;
+  if (!Number.isFinite(configured) || configured < 0 || configured > 1) {
+    return DEFAULT_RECAPTCHA_MIN_SCORE;
+  }
+  return configured;
+}
+
+function getFormString(form: FormData, name: string): string {
+  const value = form.get(name);
+  return typeof value === 'string' ? value : '';
 }
 
 // ---------------------------------------------------------------------------

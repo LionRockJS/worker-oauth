@@ -1,10 +1,11 @@
 const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://www.google.com https://www.gstatic.com",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
-    "connect-src 'self'",
+    "connect-src 'self' https://www.google.com https://www.recaptcha.net",
+    "frame-src https://www.google.com https://recaptcha.google.com https://www.recaptcha.net",
     "form-action 'self'",
     "base-uri 'none'",
     "object-src 'none'",
