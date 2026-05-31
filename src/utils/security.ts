@@ -6,7 +6,7 @@ const SECURITY_HEADERS: Record<string, string> = {
     "img-src 'self' data: https:",
     "connect-src 'self' https://www.google.com https://www.recaptcha.net",
     "frame-src https://www.google.com https://recaptcha.google.com https://www.recaptcha.net",
-    "form-action 'self'",
+    "form-action 'self' https:",
     "base-uri 'none'",
     "object-src 'none'",
     "frame-ancestors 'none'",
@@ -49,11 +49,10 @@ export function rejectCrossOriginMutation(request: Request): Response | null {
   const url = new URL(request.url);
   const origin = request.headers.get('Origin');
 
-  // Block only when the Origin header is present and explicitly cross-origin.
-  // We intentionally do NOT check Sec-Fetch-Site because reCAPTCHA's programmatic
-  // form.submit() can result in that header being absent or set to 'none' in
-  // some browser/extension configurations, causing false-positive 403s.
-  if (origin && origin !== url.origin) {
+  // `Origin: null` is sent by browsers for form submissions triggered from
+  // sandboxed/opaque contexts (e.g. reCAPTCHA iframes calling form.submit()).
+  // Treat it as same-origin rather than blocking it.
+  if (origin && origin !== 'null' && origin !== url.origin) {
     return new Response('Forbidden', { status: 403 });
   }
 

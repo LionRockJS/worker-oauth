@@ -68,13 +68,6 @@ wrangler secret put ADMIN_SECRET
 # enter a strong random value when prompted
 ```
 
-Set the CMS OAuth client secret too; use the same value as the CMS Worker's
-`OAUTH_CLIENT_SECRET` secret:
-
-```sh
-wrangler secret put CMS_CLIENT_SECRET
-```
-
 ---
 
 ### 5. Update public configuration
@@ -127,18 +120,68 @@ npm run deploy
 
 ---
 
-### 8. Seed the CMS OAuth client
+### 8. Register OAuth clients
 
-After deploying, seed or update the CMS OAuth client:
+`POST /admin/setup-clients` creates or updates any number of clients in one
+call. Pass a JSON body with a `clients` array; the request must include the
+`X-Admin-Secret` header.
+
+**Register a confidential client** (e.g. the CMS Worker):
 
 ```sh
 curl -X POST https://id.eventuai.com/admin/setup-clients \
-  -H "X-Admin-Secret: <your-ADMIN_SECRET>"
+  -H "X-Admin-Secret: <your-ADMIN_SECRET>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clients": [
+      {
+        "clientName": "Worker CMS",
+        "redirectUris": ["https://cms.example.com/auth/callback"],
+        "tokenEndpointAuthMethod": "client_secret_post",
+        "clientSecret": "<strong-random-secret>"
+      }
+    ]
+  }'
 ```
 
-Demo clients are skipped by default in production. To seed them intentionally,
-set `ALLOW_DEMO_CLIENTS=true`; set `DEMO_CONFIDENTIAL_CLIENT_SECRET` before
-creating `demo-confidential`.
+The response includes the assigned `clientId`; copy it into the CMS
+`EVENTUAI_CLIENT_ID` var and store the matching secret with
+`wrangler secret put EVENTUAI_CLIENT_SECRET`.
+
+**Register a public (PKCE-only) client** (e.g. an SPA or CLI tool):
+
+```sh
+curl -X POST https://id.eventuai.com/admin/setup-clients \
+  -H "X-Admin-Secret: <your-ADMIN_SECRET>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clients": [
+      {
+        "clientId": "my-spa",
+        "clientName": "My SPA",
+        "redirectUris": ["https://app.example.com/callback"],
+        "tokenEndpointAuthMethod": "none"
+      }
+    ]
+  }'
+```
+
+**Register multiple clients at once** by adding more objects to the array.
+
+Each client object supports:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `clientName` | Yes | Human-readable name (also used to find existing clients when `clientId` is omitted) |
+| `redirectUris` | Yes | Allowed redirect URIs |
+| `clientId` | No | Fixed client ID; provider assigns one if omitted |
+| `clientSecret` | No | Omit for public / PKCE-only clients |
+| `grantTypes` | No | Defaults to `["authorization_code", "refresh_token"]` |
+| `tokenEndpointAuthMethod` | No | `"client_secret_post"` (default when secret provided), `"client_secret_basic"`, or `"none"` |
+
+Demo clients (`demo-public`, `demo-confidential`) are controlled separately by
+setting `ALLOW_DEMO_CLIENTS=true`; set `DEMO_CONFIDENTIAL_CLIENT_SECRET` before
+seeding `demo-confidential`.
 
 ---
 
@@ -162,7 +205,7 @@ npm run dev                # starts wrangler dev on http://localhost:8787
 | `POST` | `/oauth/token` | Token endpoint |
 | `GET` | `/oauth/userinfo` | OIDC UserInfo (Bearer token required) |
 | `GET` | `/.well-known/oauth-authorization-server` | RFC 8414 discovery |
-| `POST` | `/admin/setup-clients` | CMS client seeding (`X-Admin-Secret` header) |
+| `POST` | `/admin/setup-clients` | Create/update OAuth clients (`X-Admin-Secret` header) |
 
 ## Supported scopes
 

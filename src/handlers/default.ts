@@ -196,7 +196,8 @@ async function handleAuthorizeGet(request: Request, env: Env, url: URL): Promise
     .replace('{{CLIENT_ID}}', escapeHtml(oauthReqInfo.clientId))
     .replace('{{SCOPE_ITEMS}}', scopeItems)
     .replace('{{ROLES}}', escapeHtml(roles.join(', ') || 'No roles'))
-    .replace('{{REQUEST_ID}}', requestId);
+    .replace('{{REQUEST_ID}}', requestId)
+    .replace('{{AUTHORIZE_ACTION}}', new URL('/oauth/authorize', env.ISSUER).toString());
 
   return htmlResponse(rendered);
 }
@@ -575,9 +576,34 @@ async function handleApiMe(request: Request, env: Env): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
-// POST /admin/setup-clients – protected seeding of the CMS OAuth client
+// POST /admin/setup-clients – create/update OAuth clients
 //   Requires header: X-Admin-Secret matching env.ADMIN_SECRET (wrangler secret)
+//
+//   Request body (application/json):
+//   {
+//     "clients": [
+//       {
+//         "clientId": "my-app",            // optional; provider assigns if omitted
+//         "clientName": "My Application",  // required
+//         "redirectUris": ["https://app.example.com/callback"],
+//         "grantTypes": ["authorization_code", "refresh_token"],
+//         "tokenEndpointAuthMethod": "client_secret_post",  // or "none" for public
+//         "clientSecret": "..."            // omit for public (PKCE-only) clients
+//       }
+//     ]
+//   }
+//
+//   Built-in demo clients are still controlled by ALLOW_DEMO_CLIENTS=true.
 // ---------------------------------------------------------------------------
+
+interface ClientDef {
+  clientId?: string;
+  clientName: string;
+  redirectUris: string[];
+  grantTypes?: string[];
+  tokenEndpointAuthMethod?: string;
+  clientSecret?: string;
+}
 
 async function handleSetupClients(request: Request, env: Env): Promise<Response> {
   const adminSecret = env.ADMIN_SECRET;
@@ -645,37 +671,52 @@ async function handleSetupClients(request: Request, env: Env): Promise<Response>
     results.push({ clientId: 'demo-confidential', status: 'deleted/skipped; set ALLOW_DEMO_CLIENTS=true to seed demo clients' });
   }
 
-  // CMS client – cms.eventuai.com
+  // Arbitrary clients from request body
+  let bodyClients: ClientDef[] = [];
   try {
-    const cmsSecret = env.CMS_CLIENT_SECRET;
-    if (!cmsSecret) {
-      results.push({ clientId: 'cms-eventuai', status: 'error: CMS_CLIENT_SECRET secret not set' });
-    } else {
-      // Find existing client by name so we can update its secret if needed
-      const all = await env.OAUTH_PROVIDER.listClients({ limit: 100 });
-      const existing = all.items.find((c) => c.clientName === 'Worker CMS');
-      if (existing) {
-        await env.OAUTH_PROVIDER.updateClient(existing.clientId, {
-          clientName: 'Worker CMS',
-          redirectUris: ['https://cms.eventuai.com/auth/callback'],
-          grantTypes: ['authorization_code', 'refresh_token'],
-          tokenEndpointAuthMethod: 'client_secret_post',
-          clientSecret: cmsSecret,
-        });
-        results.push({ clientId: existing.clientId, status: 'updated' });
-      } else {
-        const c = await env.OAUTH_PROVIDER.createClient({
-          clientName: 'Worker CMS',
-          redirectUris: ['https://cms.eventuai.com/auth/callback'],
-          grantTypes: ['authorization_code', 'refresh_token'],
-          tokenEndpointAuthMethod: 'client_secret_post',
-          clientSecret: cmsSecret,
-        });
-        results.push({ clientId: c.clientId, status: 'created' });
+    const ct = request.headers.get('Content-Type') ?? '';
+    if (ct.includes('application/json')) {
+      const body = await request.json<{ clients?: unknown }>();
+      if (Array.isArray(body.clients)) {
+        bodyClients = body.clients as ClientDef[];
       }
     }
-  } catch (err) {
-    results.push({ clientId: 'cms', status: `error: ${String(err)}` });
+  } catch {
+    // No body or invalid JSON – proceed with demo clients only
+  }
+
+  for (const def of bodyClients) {
+    if (!def.clientName || !Array.isArray(def.redirectUris) || def.redirectUris.length === 0) {
+      results.push({ clientId: def.clientId ?? def.clientName ?? '(unknown)', status: 'error: clientName and redirectUris are required' });
+      continue;
+    }
+
+    try {
+      const existing = def.clientId
+        ? await env.OAUTH_PROVIDER.lookupClient(def.clientId)
+        : (await env.OAUTH_PROVIDER.listClients({ limit: 200 })).items.find((c) => c.clientName === def.clientName);
+
+      const clientDef = {
+        clientName: def.clientName,
+        redirectUris: def.redirectUris,
+        grantTypes: def.grantTypes ?? ['authorization_code', 'refresh_token'],
+        tokenEndpointAuthMethod: def.tokenEndpointAuthMethod ?? (def.clientSecret ? 'client_secret_post' : 'none'),
+        ...(def.clientSecret ? { clientSecret: def.clientSecret } : {}),
+      };
+
+      if (existing) {
+        await env.OAUTH_PROVIDER.updateClient(existing.clientId, clientDef);
+        results.push({ clientId: existing.clientId, status: 'updated' });
+      } else {
+        const created = await env.OAUTH_PROVIDER.createClient({
+          ...(def.clientId ? { clientId: def.clientId } : {}),
+          ...clientDef,
+        });
+        results.push({ clientId: created.clientId, status: 'created' });
+      }
+    } catch (err) {
+      results.push({ clientId: def.clientId ?? def.clientName, status: `error: ${String(err)}` });
+    }
   }
 
   return Response.json({ results });

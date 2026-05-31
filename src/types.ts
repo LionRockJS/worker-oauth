@@ -31,8 +31,6 @@ export interface Env {
   ADMIN_SECRET?: string;
   /** Google reCAPTCHA Enterprise assessment API key */
   RECAPTCHA_API_KEY?: string;
-  /** Client secret shared with cms.eventuai.com */
-  CMS_CLIENT_SECRET?: string;
   /** Set to "true" only when demo OAuth clients should be seeded */
   ALLOW_DEMO_CLIENTS?: string;
   /** Required when ALLOW_DEMO_CLIENTS is true and demo-confidential is seeded */
