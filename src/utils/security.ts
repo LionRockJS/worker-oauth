@@ -48,8 +48,8 @@ export function rejectCrossOriginMutation(request: Request): Response | null {
 
   const url = new URL(request.url);
   const origin = request.headers.get('Origin');
-  if (origin && origin !== url.origin) {
-    return new Response('Forbidden', { status: 403 });
+  if (origin) {
+    return origin === url.origin ? null : new Response('Forbidden', { status: 403 });
   }
 
   if (request.headers.get('Sec-Fetch-Site') === 'cross-site') {
