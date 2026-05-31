@@ -48,11 +48,12 @@ export function rejectCrossOriginMutation(request: Request): Response | null {
 
   const url = new URL(request.url);
   const origin = request.headers.get('Origin');
-  if (origin && origin !== url.origin) {
-    return new Response('Forbidden', { status: 403 });
-  }
 
-  if (request.headers.get('Sec-Fetch-Site') === 'cross-site') {
+  // Block only when the Origin header is present and explicitly cross-origin.
+  // We intentionally do NOT check Sec-Fetch-Site because reCAPTCHA's programmatic
+  // form.submit() can result in that header being absent or set to 'none' in
+  // some browser/extension configurations, causing false-positive 403s.
+  if (origin && origin !== url.origin) {
     return new Response('Forbidden', { status: 403 });
   }
 

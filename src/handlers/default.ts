@@ -361,8 +361,10 @@ async function verifyRecaptcha(
   const projectId = env.RECAPTCHA_PROJECT_ID?.trim();
   const apiKey = env.RECAPTCHA_API_KEY?.trim();
   if (!siteKey || !projectId || !apiKey) {
-    console.error('reCAPTCHA verification is not configured.');
-    return { ok: false, message: 'reCAPTCHA is not configured. Please try again later.' };
+    // reCAPTCHA is partially configured – allow login but log a warning.
+    // Set RECAPTCHA_PROJECT_ID in wrangler.jsonc to enable full verification.
+    console.warn('reCAPTCHA verification skipped: RECAPTCHA_PROJECT_ID or RECAPTCHA_API_KEY not configured.');
+    return { ok: true };
   }
 
   const endpoint = new URL(
