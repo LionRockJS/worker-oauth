@@ -52,8 +52,13 @@ export function rejectCrossOriginMutation(request: Request): Response | null {
     return origin === url.origin ? null : new Response('Forbidden', { status: 403 });
   }
 
-  if (request.headers.get('Sec-Fetch-Site') === 'cross-site') {
-    return new Response('Forbidden', { status: 403 });
+  const referer = request.headers.get('Referer');
+  if (referer) {
+    try {
+      return new URL(referer).origin === url.origin ? null : new Response('Forbidden', { status: 403 });
+    } catch {
+      return new Response('Forbidden', { status: 403 });
+    }
   }
 
   return null;
