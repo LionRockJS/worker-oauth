@@ -119,7 +119,12 @@ export const defaultHandler = {
         return handleSetupClients(request, env);
       }
 
-      // Fall through to static assets
+      // Fall through to static assets (only known public paths)
+      const staticAssetPaths = ['/', '/authorize.html', '/dashboard.html', '/login.html', '/register.html'];
+      const isStaticAsset = staticAssetPaths.includes(path) || path.startsWith('/favicon') || path.startsWith('/_');
+      if (!isStaticAsset) {
+        return new Response('Not Found', { status: 404 });
+      }
       return env.ASSETS.fetch(request);
     } catch (err) {
       console.error('defaultHandler error:', err);
