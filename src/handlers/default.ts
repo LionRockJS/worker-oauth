@@ -1,5 +1,5 @@
 import type { AuthRequest } from '@cloudflare/workers-oauth-provider';
-import type { Env } from '../types';
+import type { Env, SessionData } from '../types';
 import {
   getUserByUsername,
   getUserByEmail,
@@ -34,6 +34,7 @@ const LOGIN_RATE_LIMIT_TTL = 15 * 60;
 const MAX_FAILED_LOGINS = 8;
 const RECAPTCHA_ACTION = 'submit';
 const DEFAULT_RECAPTCHA_MIN_SCORE = 0.5;
+const CONSENT_APPROVAL_PREFIX = 'consent_approval:';
 
 type RecaptchaVerification =
   | { ok: true }
@@ -172,6 +173,10 @@ async function handleAuthorizeGet(request: Request, env: Env, url: URL): Promise
     );
   }
 
+  if (await hasApprovedConsent(env.SESSIONS, session.userId, oauthReqInfo.clientId, oauthReqInfo.scope)) {
+    return completeUserAuthorization(env, session, oauthReqInfo);
+  }
+
   // Store the parsed request so POST /oauth/authorize can retrieve it
   const requestId = crypto.randomUUID();
   await env.SESSIONS.put(`consent_req:${requestId}`, JSON.stringify(oauthReqInfo), {
@@ -240,6 +245,15 @@ async function handleAuthorizePost(request: Request, env: Env, url: URL): Promis
     return Response.redirect(denyUrl.toString(), 302);
   }
 
+  await rememberApprovedConsent(env.SESSIONS, session.userId, oauthReqInfo.clientId, oauthReqInfo.scope);
+  return completeUserAuthorization(env, session, oauthReqInfo);
+}
+
+async function completeUserAuthorization(
+  env: Env,
+  session: SessionData,
+  oauthReqInfo: AuthRequest,
+): Promise<Response> {
   // Fetch user details to store in grant props (encrypted by the library)
   const user = await getUserById(env.DB, session.userId);
   const roles = await getUserRoles(env.DB, session.userId);
@@ -258,6 +272,54 @@ async function handleAuthorizePost(request: Request, env: Env, url: URL): Promis
   });
 
   return Response.redirect(redirectTo, 302);
+}
+
+async function hasApprovedConsent(
+  kv: KVNamespace,
+  userId: string,
+  clientId: string,
+  requestedScopes: string[],
+): Promise<boolean> {
+  const approved = await readApprovedScopes(kv, userId, clientId);
+  if (!approved) return false;
+
+  return normalizeScopes(requestedScopes).every((scope) => approved.has(scope));
+}
+
+async function rememberApprovedConsent(
+  kv: KVNamespace,
+  userId: string,
+  clientId: string,
+  approvedScopes: string[],
+): Promise<void> {
+  const existing = await readApprovedScopes(kv, userId, clientId);
+  const scopes = normalizeScopes([...(existing ?? []), ...approvedScopes]);
+  await kv.put(getConsentApprovalKey(userId, clientId), JSON.stringify(scopes));
+}
+
+async function readApprovedScopes(
+  kv: KVNamespace,
+  userId: string,
+  clientId: string,
+): Promise<Set<string> | null> {
+  const raw = await kv.get(getConsentApprovalKey(userId, clientId));
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return new Set(parsed.filter((scope): scope is string => typeof scope === 'string'));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeScopes(scopes: string[]): string[] {
+  return Array.from(new Set(scopes)).sort();
+}
+
+function getConsentApprovalKey(userId: string, clientId: string): string {
+  return `${CONSENT_APPROVAL_PREFIX}${encodeURIComponent(userId)}:${encodeURIComponent(clientId)}`;
 }
 
 // ---------------------------------------------------------------------------
