@@ -218,6 +218,10 @@ async function handleAuthorizePost(request: Request, env: Env, url: URL): Promis
   const requestId = (form.get('request_id') as string | null) ?? '';
   const action = (form.get('action') as string | null) ?? '';
 
+  if (action !== 'approve' && action !== 'deny') {
+    return htmlResponse('<h1>Invalid action</h1>', 400);
+  }
+
   // Retrieve the stored OAuth request info
   const stored = await env.SESSIONS.get(`consent_req:${requestId}`);
   if (!stored) {
@@ -234,10 +238,6 @@ async function handleAuthorizePost(request: Request, env: Env, url: URL): Promis
     denyUrl.searchParams.set('error_description', 'User denied the authorization request');
     if (oauthReqInfo.state) denyUrl.searchParams.set('state', oauthReqInfo.state);
     return Response.redirect(denyUrl.toString(), 302);
-  }
-
-  if (action !== 'approve') {
-    return htmlResponse('<h1>Invalid action</h1>', 400);
   }
 
   // Fetch user details to store in grant props (encrypted by the library)

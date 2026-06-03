@@ -69,6 +69,7 @@
         <!-- Actions -->
         <form method="POST" action="{{AUTHORIZE_ACTION}}" class="flex gap-3">
           <input type="hidden" name="request_id" value="{{REQUEST_ID}}" />
+          <input type="hidden" id="selected-action" />
 
           <button
             type="submit"
@@ -104,22 +105,24 @@
 
   <script>
     // Disable both buttons after the form is submitted to prevent double-submit.
-    // We capture the clicked button's value in a hidden input BEFORE disabling,
-    // because disabled buttons are excluded from form data.
-    document.querySelector('form').addEventListener('submit', function (e) {
-      const clicked = document.activeElement;
-      if (clicked && clicked.name === 'action') {
-        const hidden = document.createElement('input');
-        hidden.type = 'hidden';
-        hidden.name = 'action';
-        hidden.value = clicked.value;
-        this.appendChild(hidden);
-        // Remove name from the button so it isn't submitted twice
-        clicked.removeAttribute('name');
-        if (clicked.value === 'approve') {
-          clicked.textContent = 'Authorizing…';
-        }
+    // Disabled submit buttons are excluded from form data, so mirror the
+    // selected submitter in a hidden field before disabling the buttons.
+    const form = document.querySelector('form');
+    const selectedAction = document.getElementById('selected-action');
+
+    form.addEventListener('submit', function (event) {
+      const clicked = event.submitter;
+      if (!clicked || clicked.name !== 'action') {
+        return;
       }
+
+      selectedAction.name = 'action';
+      selectedAction.value = clicked.value;
+
+      if (clicked.value === 'approve') {
+        clicked.textContent = 'Authorizing…';
+      }
+
       document.querySelectorAll('button[type="submit"]').forEach(btn => {
         btn.disabled = true;
       });
