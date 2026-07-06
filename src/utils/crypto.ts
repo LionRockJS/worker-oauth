@@ -133,24 +133,34 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
 /**
  * Verify a PKCE code verifier against a previously stored code challenge.
- * Supports S256 (recommended) and plain methods.
+ * Only S256 is supported — plain is disabled (OAuth 2.1 / allowPlainPKCE: false).
  */
 export async function verifyPKCE(
   codeVerifier: string,
   codeChallenge: string,
   method: string,
 ): Promise<boolean> {
-  if (method === 'S256') {
-    const digest = await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(codeVerifier),
-    );
-    return base64url(digest) === codeChallenge;
+  if (method !== 'S256') return false;
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(codeVerifier),
+  );
+  return base64url(digest) === codeChallenge;
+}
+
+/**
+ * A throwaway Argon2id hash, computed once per isolate, used to perform a
+ * constant-cost password verification when the supplied username does not exist.
+ * This keeps login response timing uniform for valid vs. unknown users and
+ * removes the user-enumeration side channel.
+ */
+let decoyHashPromise: Promise<string> | null = null;
+
+export function getDecoyHash(): Promise<string> {
+  if (!decoyHashPromise) {
+    decoyHashPromise = hashPassword(generateToken());
   }
-  if (method === 'plain') {
-    return codeVerifier === codeChallenge;
-  }
-  return false;
+  return decoyHashPromise;
 }
 
 /**

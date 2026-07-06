@@ -1,12 +1,18 @@
+import { generateToken } from './crypto';
+
 const SECURITY_HEADERS: Record<string, string> = {
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://www.google.com https://www.gstatic.com",
+    // No 'unsafe-inline'/'unsafe-eval': all first-party scripts are external
+    // files served from 'self'. Google origins are required by reCAPTCHA.
+    "script-src 'self' https://www.google.com https://www.gstatic.com",
+    // 'unsafe-inline' retained for styles only — reCAPTCHA injects inline
+    // styles for its badge/challenge; style injection is low risk.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "connect-src 'self' https://www.google.com https://www.recaptcha.net",
     "frame-src https://www.google.com https://recaptcha.google.com https://www.recaptcha.net",
-    "form-action 'self' https:",
+    "form-action 'self'",
     "base-uri 'none'",
     "object-src 'none'",
     "frame-ancestors 'none'",
@@ -15,10 +21,53 @@ const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-  'Strict-Transport-Security': 'max-age=31536000',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
 };
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+// ---------------------------------------------------------------------------
+// CSRF – double-submit cookie. A random token is set in a host-only cookie on
+// GET renders and mirrored into a hidden form field; mutating POSTs must echo
+// a matching token. Combined with the Origin check and SameSite=Lax cookies
+// this gives layered CSRF protection independent of the reCAPTCHA flow.
+// ---------------------------------------------------------------------------
+
+const CSRF_COOKIE_SECURE = '__Host-csrf';
+const CSRF_COOKIE_INSECURE = 'csrf';
+const CSRF_COOKIE_TTL = 3600;
+
+export function getCsrfCookie(request: Request): string | null {
+  const cookie = request.headers.get('Cookie') ?? '';
+  const match = /(?:^|;\s*)(?:__Host-)?csrf=([^;]+)/.exec(cookie);
+  return match ? match[1] : null;
+}
+
+export function buildCsrfCookie(token: string, secure: boolean): string {
+  const name = secure ? CSRF_COOKIE_SECURE : CSRF_COOKIE_INSECURE;
+  const parts = [`${name}=${token}`, 'HttpOnly', 'SameSite=Lax', 'Path=/', `Max-Age=${CSRF_COOKIE_TTL}`];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+/**
+ * Return the CSRF token to embed in a form, reusing the existing cookie token
+ * when present. `setCookie` is non-null only when a fresh cookie must be set.
+ */
+export function ensureCsrfToken(request: Request, secure: boolean): { token: string; setCookie: string | null } {
+  const existing = getCsrfCookie(request);
+  if (existing) return { token: existing, setCookie: null };
+  const token = generateToken();
+  return { token, setCookie: buildCsrfCookie(token, secure) };
+}
+
+export async function validateCsrf(request: Request, form: FormData): Promise<boolean> {
+  const cookieToken = getCsrfCookie(request);
+  const field = form.get('csrf_token');
+  const formToken = typeof field === 'string' ? field : '';
+  if (!cookieToken || !formToken) return false;
+  return timingSafeEqualStrings(formToken, cookieToken);
+}
 
 export function withSecurityHeaders(response: Response): Response {
   const secured = new Response(response.body, response);
@@ -49,10 +98,12 @@ export function rejectCrossOriginMutation(request: Request): Response | null {
   const url = new URL(request.url);
   const origin = request.headers.get('Origin');
 
-  // `Origin: null` is sent by browsers for form submissions triggered from
-  // sandboxed/opaque contexts (e.g. reCAPTCHA iframes calling form.submit()).
-  // Treat it as same-origin rather than blocking it.
-  if (origin && origin !== 'null' && origin !== url.origin) {
+  // When an Origin header is present it must match this origin. `Origin: null`
+  // (sandboxed/opaque contexts) is treated as cross-origin and rejected — the
+  // first-party login/consent flows always submit from this origin. Requests
+  // with no Origin header at all (non-browser clients) fall through to the
+  // CSRF-token check enforced by the route handlers.
+  if (origin && origin !== url.origin) {
     return new Response('Forbidden', { status: 403 });
   }
 
@@ -68,6 +119,6 @@ export async function timingSafeEqualStrings(provided: string, expected: string)
   return crypto.subtle.timingSafeEqual(providedHash, expectedHash);
 }
 
-function isLocalHost(hostname: string): boolean {
+export function isLocalHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
 }

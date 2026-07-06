@@ -4,6 +4,8 @@ import { ApiHandler } from './handlers/api';
 import { defaultHandler } from './handlers/default';
 import { canonicalHostResponse, withSecurityHeaders } from './utils/security';
 
+export { RateLimiter } from './durable/RateLimiter';
+
 // ---------------------------------------------------------------------------
 // OAuth 2.1 Provider – powered by @cloudflare/workers-oauth-provider
 //

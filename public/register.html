@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Create Account – OAuth 2.1 Provider</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center px-4">
 
@@ -33,6 +33,7 @@
       </div>
 
       <form id="register-form" method="POST" action="/register" class="space-y-5">
+        <input type="hidden" name="csrf_token" value="{{CSRF_TOKEN}}" />
 
         <div>
           <label for="username" class="block text-sm font-medium text-slate-700 mb-1">
@@ -123,28 +124,6 @@
     </div>
   </div>
 
-  <script>
-    // Show server-side error if present
-    const errorText = document.getElementById('error-text').textContent.trim();
-    if (errorText) {
-      document.getElementById('error-banner').classList.remove('hidden');
-    }
-
-    // Client-side password confirmation check
-    document.getElementById('register-form').addEventListener('submit', function (e) {
-      const pw  = document.getElementById('password').value;
-      const cpw = document.getElementById('confirm_password').value;
-      if (pw !== cpw) {
-        e.preventDefault();
-        const banner = document.getElementById('error-banner');
-        document.getElementById('error-text').textContent = 'Passwords do not match.';
-        banner.classList.remove('hidden');
-        return;
-      }
-      const btn = document.getElementById('submit-btn');
-      btn.disabled = true;
-      btn.textContent = 'Creating account…';
-    });
-  </script>
+  <script src="/js/register.js" defer></script>
 </body>
 </html>

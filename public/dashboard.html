@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard – OAuth 2.1 Provider</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body class="min-h-screen bg-slate-100">
 
@@ -74,7 +74,7 @@
 
         <div class="space-y-3 text-sm">
           <div class="rounded-lg bg-slate-50 border border-slate-200 p-4">
-            <p class="font-medium text-slate-800 mb-1">Worker CMS <span class="font-normal text-slate-400">(confidential client)</span></p>
+            <p class="font-medium text-slate-800 mb-1">0xCMS <span class="font-normal text-slate-400">(confidential client)</span></p>
             <p class="text-xs text-slate-500 font-mono break-all">redirect_uri: https://cms.eventuai.com/auth/callback</p>
             <p class="text-xs text-slate-400 mt-1">Uses client_secret_post with a secret stored in Wrangler, never in source.</p>
           </div>
@@ -147,72 +147,6 @@
     </div>
   </main>
 
-  <script>
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-    function show(id)  { document.getElementById(id).classList.remove('hidden'); }
-    function hide(id)  { document.getElementById(id).classList.add('hidden'); }
-
-    function formatDate(unixSeconds) {
-      return new Date(unixSeconds * 1000).toLocaleDateString(undefined, {
-        year: 'numeric', month: 'long', day: 'numeric'
-      });
-    }
-
-    // -----------------------------------------------------------------------
-    // Load profile via /api/me
-    // -----------------------------------------------------------------------
-    async function loadProfile() {
-      try {
-        const res = await fetch('/api/me', { credentials: 'include' });
-
-        if (res.status === 401) {
-          window.location.href = '/login';
-          return;
-        }
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const data = await res.json();
-
-        // Populate profile card
-        document.getElementById('username').textContent    = data.username;
-        document.getElementById('email').textContent       = data.email;
-        document.getElementById('member-since').textContent = formatDate(data.created_at);
-        document.getElementById('avatar').textContent =
-          data.username.charAt(0).toUpperCase();
-
-        // Roles
-        const rolesEl = document.getElementById('roles');
-        rolesEl.innerHTML = '';
-        (data.roles || []).forEach(role => {
-          const badge = document.createElement('span');
-          badge.className =
-            'inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ' +
-            (role === 'admin'
-              ? 'bg-amber-100 text-amber-800'
-              : 'bg-indigo-100 text-indigo-800');
-          badge.textContent = role;
-          rolesEl.appendChild(badge);
-        });
-        if (!data.roles || data.roles.length === 0) {
-          rolesEl.innerHTML = '<span class="text-slate-400 text-sm">No roles assigned</span>';
-        }
-
-        hide('loading');
-        show('content');
-      } catch (err) {
-        hide('loading');
-        document.getElementById('error-msg').textContent =
-          'Failed to load your profile: ' + err.message;
-        show('error-state');
-      }
-    }
-
-    // -----------------------------------------------------------------------
-    // Boot
-    // -----------------------------------------------------------------------
-    loadProfile();
-  </script>
+  <script src="/js/dashboard.js" defer></script>
 </body>
 </html>

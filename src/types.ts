@@ -1,4 +1,5 @@
 import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider';
+import type { RateLimiter } from './durable/RateLimiter';
 
 // ---------------------------------------------------------------------------
 // Cloudflare Worker bindings
@@ -15,6 +16,8 @@ export interface Env {
   ASSETS: Fetcher;
   /** OAuth provider helpers – injected by OAuthProvider wrapper */
   OAUTH_PROVIDER: OAuthHelpers;
+  /** Durable Object namespace – atomic login rate-limit counters */
+  RATE_LIMITER: DurableObjectNamespace<RateLimiter>;
 
   // ---- Public variables (wrangler.jsonc > vars) ----
   /** Canonical issuer URL, e.g. https://auth.example.com */
@@ -25,6 +28,12 @@ export interface Env {
   RECAPTCHA_PROJECT_ID?: string;
   /** Minimum accepted reCAPTCHA risk score, defaults to 0.5 */
   RECAPTCHA_MIN_SCORE?: string;
+  /**
+   * When "true" (default in production), reCAPTCHA must be fully configured and
+   * verified – missing config fails the login closed. Set to "false" only for
+   * local development without reCAPTCHA credentials.
+   */
+  RECAPTCHA_ENFORCE?: string;
 
   // ---- Secrets / deploy-time flags ----
   /** Protects POST /admin/setup-clients */

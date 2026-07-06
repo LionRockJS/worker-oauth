@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sign In – OAuth 2.1 Provider</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://www.google.com/recaptcha/enterprise.js?render={{RECAPTCHA_SITE_KEY}}"></script>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="https://www.google.com/recaptcha/enterprise.js?render={{RECAPTCHA_SITE_KEY}}" defer></script>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center px-4">
 
@@ -36,6 +36,7 @@
       <form id="login-form" method="POST" action="/login" class="space-y-5">
         <!-- Carry the OAuth auth_request through login -->
         <input type="hidden" name="auth_request_id" value="{{AUTH_REQUEST_ID}}" />
+        <input type="hidden" name="csrf_token" value="{{CSRF_TOKEN}}" />
         <input type="hidden" id="recaptcha-token" name="recaptcha_token" />
 
         <div>
@@ -93,56 +94,6 @@
     </div>
   </div>
 
-  <script>
-    const recaptchaSiteKey = '{{RECAPTCHA_SITE_KEY}}';
-
-    // Show server-side error if present
-    const errorText = document.getElementById('error-text').textContent.trim();
-    if (errorText) {
-      document.getElementById('error-banner').classList.remove('hidden');
-    }
-
-    function showClientError(message) {
-      document.getElementById('error-text').textContent = message;
-      document.getElementById('error-banner').classList.remove('hidden');
-    }
-
-    function setSubmitting(isSubmitting, label) {
-      const btn = document.getElementById('submit-btn');
-      btn.disabled = isSubmitting;
-      btn.textContent = label;
-    }
-
-    function onSubmit(token) {
-      document.getElementById('recaptcha-token').value = token;
-      setSubmitting(true, 'Signing in…');
-      document.getElementById('login-form').submit();
-    }
-
-    document.getElementById('login-form').addEventListener('submit', function (event) {
-      if (document.getElementById('recaptcha-token').value) {
-        setSubmitting(true, 'Signing in…');
-        return;
-      }
-
-      event.preventDefault();
-      setSubmitting(true, 'Checking…');
-
-      if (!window.grecaptcha || !window.grecaptcha.enterprise) {
-        setSubmitting(false, 'Sign in');
-        showClientError('reCAPTCHA is still loading. Please try again.');
-        return;
-      }
-
-      window.grecaptcha.enterprise.ready(function () {
-        window.grecaptcha.enterprise.execute(recaptchaSiteKey, { action: 'submit' })
-          .then(onSubmit)
-          .catch(function () {
-            setSubmitting(false, 'Sign in');
-            showClientError('reCAPTCHA verification could not start. Please try again.');
-          });
-      });
-    });
-  </script>
+  <script src="/js/login.js" defer></script>
 </body>
 </html>

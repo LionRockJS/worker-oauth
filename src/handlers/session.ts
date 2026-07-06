@@ -6,15 +6,22 @@ const SESSION_TTL = 86_400; // 24 hours in seconds
 // Session cookie helpers
 // ---------------------------------------------------------------------------
 
+// `__Host-` forces Secure + Path=/ + host-only (no Domain), preventing the
+// cookie from being set/overwritten by subdomains. The prefix mandates Secure,
+// so on insecure localhost dev we fall back to the unprefixed name.
+const SESSION_COOKIE_SECURE = '__Host-session';
+const SESSION_COOKIE_INSECURE = 'session';
+
 export function getSessionId(request: Request): string | null {
   const cookie = request.headers.get('Cookie') ?? '';
-  const match = /(?:^|;\s*)session=([^;]+)/.exec(cookie);
+  const match = /(?:^|;\s*)(?:__Host-)?session=([^;]+)/.exec(cookie);
   return match ? match[1] : null;
 }
 
 export function buildSetCookieHeader(sessionId: string, secure: boolean): string {
+  const name = secure ? SESSION_COOKIE_SECURE : SESSION_COOKIE_INSECURE;
   const parts = [
-    `session=${sessionId}`,
+    `${name}=${sessionId}`,
     'HttpOnly',
     'SameSite=Lax',
     'Path=/',
@@ -24,8 +31,11 @@ export function buildSetCookieHeader(sessionId: string, secure: boolean): string
   return parts.join('; ');
 }
 
-export function buildClearCookieHeader(): string {
-  return 'session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0';
+export function buildClearCookieHeader(secure: boolean): string {
+  const name = secure ? SESSION_COOKIE_SECURE : SESSION_COOKIE_INSECURE;
+  const parts = [`${name}=`, 'HttpOnly', 'SameSite=Lax', 'Path=/', 'Max-Age=0'];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
 }
 
 // ---------------------------------------------------------------------------

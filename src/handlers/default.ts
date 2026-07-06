@@ -7,7 +7,7 @@ import {
   createUser,
   getUserRoles,
 } from '../db/queries';
-import { hashPassword, verifyPassword } from '../utils/crypto';
+import { hashPassword, verifyPassword, getDecoyHash } from '../utils/crypto';
 import {
   getSessionId,
   getSession,
@@ -17,7 +17,13 @@ import {
   buildClearCookieHeader,
 } from './session';
 import { loadTemplate, htmlResponse, escapeHtml } from './ui';
-import { rejectCrossOriginMutation, timingSafeEqualStrings } from '../utils/security';
+import {
+  rejectCrossOriginMutation,
+  timingSafeEqualStrings,
+  ensureCsrfToken,
+  validateCsrf,
+  isLocalHost,
+} from '../utils/security';
 
 // ---------------------------------------------------------------------------
 // Scope descriptions shown on the consent page
@@ -31,10 +37,17 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
 };
 
 const LOGIN_RATE_LIMIT_TTL = 15 * 60;
+// Per (ip+username) and per-username (targeted) thresholds, plus a looser
+// per-IP threshold that throttles password-spraying across many usernames.
 const MAX_FAILED_LOGINS = 8;
+const MAX_FAILED_PER_USERNAME = 15;
+const MAX_FAILED_PER_IP = 30;
 const RECAPTCHA_ACTION = 'submit';
 const DEFAULT_RECAPTCHA_MIN_SCORE = 0.5;
 const CONSENT_APPROVAL_PREFIX = 'consent_approval:';
+const CONSENT_APPROVAL_TTL = 90 * 24 * 60 * 60; // 90 days
+// Argon2id hashes 19 MiB per call; cap input length to prevent a memory/CPU DoS.
+const MAX_PASSWORD_LENGTH = 128;
 
 type RecaptchaVerification =
   | { ok: true }
@@ -64,17 +77,28 @@ export const defaultHandler = {
     const method = request.method.toUpperCase();
 
     try {
-      // CORS pre-flight for any remaining cross-origin requests
+      // CORS pre-flight. These routes are cookie-authenticated and first-party,
+      // so only the canonical issuer origin is allowed credentialed access —
+      // never a wildcard.
       if (method === 'OPTIONS') {
-        return new Response(null, {
-          status: 204,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-            'Access-Control-Max-Age': '86400',
-          },
+        const headers = new Headers({
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+          'Access-Control-Max-Age': '86400',
+          Vary: 'Origin',
         });
+        const origin = request.headers.get('Origin');
+        let issuerOrigin = '';
+        try {
+          issuerOrigin = new URL(env.ISSUER).origin;
+        } catch {
+          issuerOrigin = '';
+        }
+        if (origin && origin === issuerOrigin) {
+          headers.set('Access-Control-Allow-Origin', origin);
+          headers.set('Access-Control-Allow-Credentials', 'true');
+        }
+        return new Response(null, { status: 204, headers });
       }
 
       const crossOriginMutation = rejectCrossOriginMutation(request);
@@ -177,14 +201,20 @@ async function handleAuthorizeGet(request: Request, env: Env, url: URL): Promise
     return completeUserAuthorization(env, session, oauthReqInfo);
   }
 
-  // Store the parsed request so POST /oauth/authorize can retrieve it
+  // Store the parsed request so POST /oauth/authorize can retrieve it. Bind it
+  // to the authenticated user so a different session cannot consume it.
   const requestId = crypto.randomUUID();
-  await env.SESSIONS.put(`consent_req:${requestId}`, JSON.stringify(oauthReqInfo), {
-    expirationTtl: 600,
-  });
+  await env.SESSIONS.put(
+    `consent_req:${requestId}`,
+    JSON.stringify({ req: oauthReqInfo, userId: session.userId }),
+    { expirationTtl: 600 },
+  );
 
   // Fetch roles for display
   const roles = await getUserRoles(env.DB, session.userId);
+
+  const secure = url.protocol === 'https:';
+  const csrf = ensureCsrfToken(request, secure);
 
   // Build scope list HTML
   const scopeItems = oauthReqInfo.scope
@@ -202,9 +232,12 @@ async function handleAuthorizeGet(request: Request, env: Env, url: URL): Promise
     .replace('{{SCOPE_ITEMS}}', scopeItems)
     .replace('{{ROLES}}', escapeHtml(roles.join(', ') || 'No roles'))
     .replace('{{REQUEST_ID}}', requestId)
+    .replace('{{CSRF_TOKEN}}', escapeHtml(csrf.token))
     .replace('{{AUTHORIZE_ACTION}}', new URL('/oauth/authorize', env.ISSUER).toString());
 
-  return htmlResponse(rendered);
+  const response = htmlResponse(rendered);
+  if (csrf.setCookie) response.headers.append('Set-Cookie', csrf.setCookie);
+  return response;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +253,11 @@ async function handleAuthorizePost(request: Request, env: Env, url: URL): Promis
   }
 
   const form = await request.formData();
+
+  if (!(await validateCsrf(request, form))) {
+    return htmlResponse('<h1>Invalid request</h1><p>CSRF validation failed. Please restart the authorization flow.</p>', 403);
+  }
+
   const requestId = (form.get('request_id') as string | null) ?? '';
   const action = (form.get('action') as string | null) ?? '';
 
@@ -233,9 +271,17 @@ async function handleAuthorizePost(request: Request, env: Env, url: URL): Promis
     return htmlResponse('<h1>Session expired</h1><p>Please restart the authorization flow.</p>', 400);
   }
 
-  const oauthReqInfo: AuthRequest = JSON.parse(stored);
+  const { req: oauthReqInfo, userId: boundUserId } = JSON.parse(stored) as {
+    req: AuthRequest;
+    userId: string;
+  };
   // Clean up from KV
   await env.SESSIONS.delete(`consent_req:${requestId}`);
+
+  // The consent request must belong to the session submitting it.
+  if (boundUserId !== session.userId) {
+    return htmlResponse('<h1>Invalid request</h1><p>This authorization request does not belong to your session.</p>', 403);
+  }
 
   if (action === 'deny') {
     const denyUrl = new URL(oauthReqInfo.redirectUri);
@@ -294,7 +340,9 @@ async function rememberApprovedConsent(
 ): Promise<void> {
   const existing = await readApprovedScopes(kv, userId, clientId);
   const scopes = normalizeScopes([...(existing ?? []), ...approvedScopes]);
-  await kv.put(getConsentApprovalKey(userId, clientId), JSON.stringify(scopes));
+  await kv.put(getConsentApprovalKey(userId, clientId), JSON.stringify(scopes), {
+    expirationTtl: CONSENT_APPROVAL_TTL,
+  });
 }
 
 async function readApprovedScopes(
@@ -331,7 +379,7 @@ async function handleLogin(request: Request, env: Env, url: URL): Promise<Respon
   const authRequestId = url.searchParams.get('auth_request');
 
   if (request.method === 'GET') {
-    return renderLoginPage(env, '', authRequestId ?? '');
+    return renderLoginPage(request, env, '', authRequestId ?? '');
   }
 
   // POST
@@ -343,29 +391,58 @@ async function handleLogin(request: Request, env: Env, url: URL): Promise<Respon
     getFormString(form, 'recaptcha_token') || getFormString(form, 'g-recaptcha-response');
 
   const renderError = async (msg: string): Promise<Response> => {
-    return renderLoginPage(env, msg, authReqId, 401);
+    return renderLoginPage(request, env, msg, authReqId, 401);
   };
+
+  if (!(await validateCsrf(request, form))) {
+    return renderError('Your session expired. Please try again.');
+  }
 
   if (!username || !password) return renderError('Username and password are required.');
 
-  const rateLimitKey = await getLoginRateLimitKey(request, username);
-  const failedAttempts = await getFailedLoginCount(env.SESSIONS, rateLimitKey);
-  if (failedAttempts >= MAX_FAILED_LOGINS) {
+  const limit = await loginRateLimitNames(request, username);
+
+  // Block early if any dimension is over its threshold.
+  const [ipUserCount, ipCount, userCount] = await Promise.all([
+    rlCount(env, limit.ipUser),
+    rlCount(env, limit.ip),
+    rlCount(env, limit.user),
+  ]);
+  if (
+    ipUserCount >= MAX_FAILED_LOGINS ||
+    ipCount >= MAX_FAILED_PER_IP ||
+    userCount >= MAX_FAILED_PER_USERNAME
+  ) {
     return renderError('Too many failed attempts. Please try again later.');
   }
 
   const recaptcha = await verifyRecaptcha(request, env, recaptchaToken, RECAPTCHA_ACTION);
   if (!recaptcha.ok) {
-    if (recaptcha.countFailedLogin) await recordFailedLogin(env.SESSIONS, rateLimitKey, failedAttempts);
+    if (recaptcha.countFailedLogin) await recordFailedLogin(env, limit);
     return renderError(recaptcha.message);
   }
 
-  const user = await getUserByUsername(env.DB, username);
-  if (!user || !(await verifyPassword(password, user.password_hash))) {
-    await recordFailedLogin(env.SESSIONS, rateLimitKey, failedAttempts);
+  // Over-length passwords are rejected before hashing (Argon2id DoS guard) but
+  // still counted as a failed attempt and given the generic error.
+  const user = password.length > MAX_PASSWORD_LENGTH ? null : await getUserByUsername(env.DB, username);
+
+  // Always run a verify (against a decoy hash for unknown users) so response
+  // timing does not reveal whether the username exists.
+  let passwordOk = false;
+  if (user) {
+    passwordOk = await verifyPassword(password, user.password_hash);
+  } else {
+    await verifyPassword(password.slice(0, MAX_PASSWORD_LENGTH), await getDecoyHash());
+  }
+
+  if (!user || !passwordOk) {
+    await recordFailedLogin(env, limit);
     return renderError('Invalid username or password.');
   }
-  await clearFailedLogins(env.SESSIONS, rateLimitKey);
+
+  // Successful login clears the per-user dimensions; the per-IP spray counter is
+  // left to expire so an attacker cannot reset it by logging into their own account.
+  await Promise.all([rlReset(env, limit.ipUser), rlReset(env, limit.user)]);
 
   const sessionId = await createSession(env.SESSIONS, {
     userId: user.id,
@@ -390,6 +467,7 @@ async function handleLogin(request: Request, env: Env, url: URL): Promise<Respon
 }
 
 async function renderLoginPage(
+  request: Request,
   env: Env,
   error: string,
   authRequestId: string,
@@ -397,13 +475,18 @@ async function renderLoginPage(
 ): Promise<Response> {
   const html = await loadTemplate(env, '/login.html');
   const siteKey = escapeHtml(env.RECAPTCHA_SITE_KEY ?? '');
-  return htmlResponse(
+  const secure = new URL(request.url).protocol === 'https:';
+  const csrf = ensureCsrfToken(request, secure);
+  const response = htmlResponse(
     html
       .replaceAll('{{RECAPTCHA_SITE_KEY}}', siteKey)
       .replace('{{ERROR}}', escapeHtml(error))
+      .replace('{{CSRF_TOKEN}}', escapeHtml(csrf.token))
       .replace('{{AUTH_REQUEST_ID}}', escapeHtml(authRequestId)),
     status,
   );
+  if (csrf.setCookie) response.headers.append('Set-Cookie', csrf.setCookie);
+  return response;
 }
 
 async function verifyRecaptcha(
@@ -424,10 +507,17 @@ async function verifyRecaptcha(
   const projectId = env.RECAPTCHA_PROJECT_ID?.trim();
   const apiKey = env.RECAPTCHA_API_KEY?.trim();
   if (!siteKey || !projectId || !apiKey) {
-    // reCAPTCHA is partially configured – allow login but log a warning.
-    // Set RECAPTCHA_PROJECT_ID in wrangler.jsonc to enable full verification.
-    console.warn('reCAPTCHA verification skipped: RECAPTCHA_PROJECT_ID or RECAPTCHA_API_KEY not configured.');
-    return { ok: true };
+    // reCAPTCHA is not fully configured. Fail OPEN only when enforcement is
+    // explicitly disabled or we are running on localhost; otherwise fail CLOSED
+    // so bot protection is never silently bypassed in production.
+    const enforce = (env.RECAPTCHA_ENFORCE ?? 'true').toLowerCase() === 'true';
+    const local = isLocalHost(new URL(request.url).hostname);
+    if (!enforce || local) {
+      console.warn('reCAPTCHA verification skipped (enforcement off / localhost): set RECAPTCHA_PROJECT_ID and RECAPTCHA_API_KEY to enable.');
+      return { ok: true };
+    }
+    console.error('reCAPTCHA misconfigured (RECAPTCHA_PROJECT_ID or RECAPTCHA_API_KEY missing) – failing closed.');
+    return { ok: false, message: 'Login is temporarily unavailable. Please try again later.' };
   }
 
   const endpoint = new URL(
@@ -530,8 +620,7 @@ function getFormString(form: FormData, name: string): string {
 
 async function handleRegister(request: Request, env: Env, url: URL): Promise<Response> {
   if (request.method === 'GET') {
-    const html = await loadTemplate(env, '/register.html');
-    return htmlResponse(html.replace('{{ERROR}}', ''));
+    return renderRegisterPage(request, env, '');
   }
 
   const form = await request.formData();
@@ -541,17 +630,29 @@ async function handleRegister(request: Request, env: Env, url: URL): Promise<Res
   const confirmPassword = (form.get('confirm_password') as string | null) ?? '';
 
   const renderError = async (msg: string): Promise<Response> => {
-    const html = await loadTemplate(env, '/register.html');
-    return htmlResponse(html.replace('{{ERROR}}', escapeHtml(msg)), 400);
+    return renderRegisterPage(request, env, msg, 400);
   };
+
+  if (!(await validateCsrf(request, form))) {
+    return renderError('Your session expired. Please try again.');
+  }
 
   if (!username || !email || !password) return renderError('All fields are required.');
   if (password !== confirmPassword) return renderError('Passwords do not match.');
   if (password.length < 8) return renderError('Password must be at least 8 characters.');
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    return renderError(`Password must be at most ${MAX_PASSWORD_LENGTH} characters.`);
+  }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return renderError('Invalid email address.');
 
-  if (await getUserByUsername(env.DB, username)) return renderError('Username already taken.');
-  if (await getUserByEmail(env.DB, email)) return renderError('Email already registered.');
+  // Single generic message for both duplicate cases to avoid account enumeration.
+  const [existingByUsername, existingByEmail] = await Promise.all([
+    getUserByUsername(env.DB, username),
+    getUserByEmail(env.DB, email),
+  ]);
+  if (existingByUsername || existingByEmail) {
+    return renderError('That username or email is unavailable.');
+  }
 
   const id = crypto.randomUUID();
   await createUser(env.DB, {
@@ -571,6 +672,25 @@ async function handleRegister(request: Request, env: Env, url: URL): Promise<Res
       Location: '/dashboard',
     },
   });
+}
+
+async function renderRegisterPage(
+  request: Request,
+  env: Env,
+  error: string,
+  status = 200,
+): Promise<Response> {
+  const html = await loadTemplate(env, '/register.html');
+  const secure = new URL(request.url).protocol === 'https:';
+  const csrf = ensureCsrfToken(request, secure);
+  const response = htmlResponse(
+    html
+      .replace('{{ERROR}}', escapeHtml(error))
+      .replace('{{CSRF_TOKEN}}', escapeHtml(csrf.token)),
+    status,
+  );
+  if (csrf.setCookie) response.headers.append('Set-Cookie', csrf.setCookie);
+  return response;
 }
 
 // ---------------------------------------------------------------------------
@@ -597,10 +717,11 @@ async function handleLogout(request: Request, env: Env): Promise<Response> {
   const sessionId = getSessionId(request);
   if (sessionId) await deleteSession(env.SESSIONS, sessionId);
 
+  const secure = new URL(request.url).protocol === 'https:';
   return new Response(null, {
     status: 302,
     headers: {
-      'Set-Cookie': buildClearCookieHeader(),
+      'Set-Cookie': buildClearCookieHeader(secure),
       Location: '/login',
     },
   });
@@ -671,7 +792,11 @@ async function handleSetupClients(request: Request, env: Env): Promise<Response>
   const adminSecret = env.ADMIN_SECRET;
   const provided = request.headers.get('X-Admin-Secret');
 
-  if (!adminSecret || !provided || !(await timingSafeEqualStrings(provided, adminSecret))) {
+  if (!adminSecret) {
+    console.error('ADMIN_SECRET is not configured – /admin/setup-clients is disabled. Set it with `wrangler secret put ADMIN_SECRET`.');
+    return Response.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (!provided || !(await timingSafeEqualStrings(provided, adminSecret))) {
     return Response.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -753,6 +878,12 @@ async function handleSetupClients(request: Request, env: Env): Promise<Response>
       continue;
     }
 
+    const redirectError = validateRedirectUris(def.redirectUris);
+    if (redirectError) {
+      results.push({ clientId: def.clientId ?? def.clientName, status: `error: ${redirectError}` });
+      continue;
+    }
+
     try {
       const existing = def.clientId
         ? await env.OAUTH_PROVIDER.lookupClient(def.clientId)
@@ -784,30 +915,82 @@ async function handleSetupClients(request: Request, env: Env): Promise<Response>
   return Response.json({ results });
 }
 
-async function getLoginRateLimitKey(request: Request, username: string): Promise<string> {
-  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? 'unknown';
-  const material = `${ip}:${username.toLowerCase()}`;
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material));
-  const hex = Array.from(new Uint8Array(digest))
+// ---------------------------------------------------------------------------
+// Login rate limiting – backed by the RateLimiter Durable Object so increments
+// are atomic. Three independent dimensions are tracked per attempt.
+// ---------------------------------------------------------------------------
+
+interface LoginRateLimitNames {
+  ipUser: string;
+  ip: string;
+  user: string;
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
-  return `login_fail:${hex}`;
 }
 
-async function getFailedLoginCount(kv: KVNamespace, key: string): Promise<number> {
-  const value = await kv.get(key);
-  return value ? parseInt(value, 10) || 0 : 0;
+async function loginRateLimitNames(request: Request, username: string): Promise<LoginRateLimitNames> {
+  const ip = request.headers.get('CF-Connecting-IP') ?? request.headers.get('X-Forwarded-For') ?? 'unknown';
+  const user = username.toLowerCase();
+  const [ipUserHash, ipHash, userHash] = await Promise.all([
+    sha256Hex(`${ip}:${user}`),
+    sha256Hex(ip),
+    sha256Hex(user),
+  ]);
+  return { ipUser: `ipuser:${ipUserHash}`, ip: `ip:${ipHash}`, user: `user:${userHash}` };
 }
 
-async function recordFailedLogin(kv: KVNamespace, key: string, previousCount: number): Promise<void> {
-  await kv.put(key, String(previousCount + 1), { expirationTtl: LOGIN_RATE_LIMIT_TTL });
+function rlStub(env: Env, name: string) {
+  return env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(name));
 }
 
-async function clearFailedLogins(kv: KVNamespace, key: string): Promise<void> {
-  await kv.delete(key);
+async function rlCount(env: Env, name: string): Promise<number> {
+  return rlStub(env, name).count();
+}
+
+async function rlReset(env: Env, name: string): Promise<void> {
+  await rlStub(env, name).reset();
+}
+
+async function recordFailedLogin(env: Env, names: LoginRateLimitNames): Promise<void> {
+  await Promise.all([
+    rlStub(env, names.ipUser).increment(LOGIN_RATE_LIMIT_TTL),
+    rlStub(env, names.ip).increment(LOGIN_RATE_LIMIT_TTL),
+    rlStub(env, names.user).increment(LOGIN_RATE_LIMIT_TTL),
+  ]);
 }
 
 async function deleteClientIfPresent(env: Env, clientId: string): Promise<void> {
   const existing = await env.OAUTH_PROVIDER.lookupClient(clientId);
   if (existing) await env.OAUTH_PROVIDER.deleteClient(existing.clientId);
+}
+
+/**
+ * Validate client redirect URIs to prevent token-theft via loose redirects.
+ * Requires absolute https:// (http:// allowed only for localhost), and rejects
+ * fragments and wildcard hosts. Returns an error message or null when valid.
+ */
+function validateRedirectUris(uris: unknown[]): string | null {
+  for (const raw of uris) {
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      return 'redirectUris must be non-empty strings';
+    }
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return `invalid redirect URI: ${raw}`;
+    }
+    if (url.hash) return `redirect URI must not contain a fragment: ${raw}`;
+    if (url.hostname.includes('*')) return `redirect URI must not contain wildcards: ${raw}`;
+    const isLocal = isLocalHost(url.hostname);
+    if (url.protocol === 'https:') continue;
+    if (url.protocol === 'http:' && isLocal) continue;
+    return `redirect URI must use https (http allowed only for localhost): ${raw}`;
+  }
+  return null;
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Authorize – OAuth 2.1 Provider</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center px-4">
 
@@ -69,6 +69,7 @@
         <!-- Actions -->
         <form method="POST" action="{{AUTHORIZE_ACTION}}" class="flex gap-3">
           <input type="hidden" name="request_id" value="{{REQUEST_ID}}" />
+          <input type="hidden" name="csrf_token" value="{{CSRF_TOKEN}}" />
           <input type="hidden" id="selected-action" />
 
           <button
@@ -103,30 +104,6 @@
     </p>
   </div>
 
-  <script>
-    // Disable both buttons after the form is submitted to prevent double-submit.
-    // Disabled submit buttons are excluded from form data, so mirror the
-    // selected submitter in a hidden field before disabling the buttons.
-    const form = document.querySelector('form');
-    const selectedAction = document.getElementById('selected-action');
-
-    form.addEventListener('submit', function (event) {
-      const clicked = event.submitter;
-      if (!clicked || clicked.name !== 'action') {
-        return;
-      }
-
-      selectedAction.name = 'action';
-      selectedAction.value = clicked.value;
-
-      if (clicked.value === 'approve') {
-        clicked.textContent = 'Authorizing…';
-      }
-
-      document.querySelectorAll('button[type="submit"]').forEach(btn => {
-        btn.disabled = true;
-      });
-    });
-  </script>
+  <script src="/js/authorize.js" defer></script>
 </body>
 </html>

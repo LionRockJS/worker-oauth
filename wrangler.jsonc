@@ -34,6 +34,23 @@
 			"id": "1cb29c82bc4f44a89873d5eba1ac98a0"
 		}
 	],
+	// Durable Objects – atomic login rate-limit counters
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "RATE_LIMITER",
+				"class_name": "RateLimiter"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"RateLimiter"
+			]
+		}
+	],
 	// Public configuration variables
 	"vars": {
 		// The canonical issuer URL of this authorization server
@@ -42,6 +59,9 @@
 		"RECAPTCHA_SITE_KEY": "6LfhfwQtAAAAACRmsenmnvRlj6eNikByvdpDi_8J",
 		// Set this to the Google Cloud project ID that owns the site key before deploy.
 		// "RECAPTCHA_PROJECT_ID": "your-google-cloud-project-id",
-		"RECAPTCHA_MIN_SCORE": "0.5"
+		"RECAPTCHA_MIN_SCORE": "0.5",
+		// reCAPTCHA is enforced (fail-closed) by default. Set to "false" only for
+		// local dev without reCAPTCHA credentials; never in production.
+		"RECAPTCHA_ENFORCE": "true"
 	}
 }
