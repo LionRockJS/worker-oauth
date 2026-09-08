@@ -1,4 +1,5 @@
 import type { SessionData } from '../types';
+import { readHostCookie } from '../utils/security';
 
 const SESSION_TTL = 86_400; // 24 hours in seconds
 
@@ -13,9 +14,8 @@ const SESSION_COOKIE_SECURE = '__Host-session';
 const SESSION_COOKIE_INSECURE = 'session';
 
 export function getSessionId(request: Request): string | null {
-  const cookie = request.headers.get('Cookie') ?? '';
-  const match = /(?:^|;\s*)(?:__Host-)?session=([^;]+)/.exec(cookie);
-  return match ? match[1] : null;
+  const value = readHostCookie(request, 'session');
+  return value && /^[0-9a-f-]{36}$/.test(value) ? value : null;
 }
 
 export function buildSetCookieHeader(sessionId: string, secure: boolean): string {

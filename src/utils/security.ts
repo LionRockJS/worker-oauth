@@ -38,9 +38,17 @@ const CSRF_COOKIE_INSECURE = 'csrf';
 const CSRF_COOKIE_TTL = 3600;
 
 export function getCsrfCookie(request: Request): string | null {
-  const cookie = request.headers.get('Cookie') ?? '';
-  const match = /(?:^|;\s*)(?:__Host-)?csrf=([^;]+)/.exec(cookie);
-  return match ? match[1] : null;
+  const value = readHostCookie(request, 'csrf');
+  return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
+}
+
+/** Never accept development cookies on HTTPS, or ambiguous duplicate cookies. */
+export function readHostCookie(request: Request, name: string): string | null {
+  const secure = new URL(request.url).protocol === 'https:';
+  const expected = secure ? `__Host-${name}` : name;
+  const values = (request.headers.get('Cookie') ?? '').split(';')
+    .map((part) => part.trim()).filter((part) => part.startsWith(`${expected}=`));
+  return values.length === 1 ? values[0].slice(expected.length + 1) : null;
 }
 
 export function buildCsrfCookie(token: string, secure: boolean): string {
@@ -74,6 +82,8 @@ export function withSecurityHeaders(response: Response): Response {
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     secured.headers.set(name, value);
   }
+  secured.headers.set('Cache-Control', 'no-store');
+  secured.headers.set('Pragma', 'no-cache');
   return secured;
 }
 
@@ -85,11 +95,57 @@ export function canonicalHostResponse(request: Request, canonicalOrigin: string)
   if (url.origin === canonical.origin) return null;
 
   if (request.method === 'GET' || request.method === 'HEAD') {
-    const redirectUrl = new URL(url.pathname + url.search, canonical.origin);
+    const redirectUrl = new URL(canonical.origin);
+    redirectUrl.pathname = url.pathname;
+    redirectUrl.search = url.search;
     return Response.redirect(redirectUrl.toString(), 308);
   }
 
   return new Response('Not Found', { status: 404 });
+}
+
+export class RequestInputError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
+}
+
+/** Bound bytes actually read, including chunked requests without Content-Length. */
+export async function boundRequestBody(request: Request, maxBytes = 65_536): Promise<Request> {
+  if (!request.body) return request;
+  if (Number(request.headers.get('Content-Length')) > maxBytes) {
+    throw new RequestInputError(413, 'Request body too large');
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > maxBytes) {
+      await reader.cancel();
+      throw new RequestInputError(413, 'Request body too large');
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return new Request(request, { body });
+}
+
+export async function readForm(request: Request): Promise<FormData> {
+  if (request.headers.get('Content-Type')?.split(';')[0].trim() !== 'application/x-www-form-urlencoded') {
+    throw new RequestInputError(415, 'Expected a URL-encoded form');
+  }
+  let form: FormData;
+  try { form = await request.formData(); }
+  catch { throw new RequestInputError(400, 'Invalid form'); }
+  for (const key of form.keys()) {
+    if (form.getAll(key).length !== 1 || typeof form.get(key) !== 'string') {
+      throw new RequestInputError(400, 'Duplicate or invalid form field');
+    }
+  }
+  return form;
 }
 
 export function rejectCrossOriginMutation(request: Request): Response | null {

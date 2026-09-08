@@ -29,9 +29,8 @@ export interface Env {
   /** Minimum accepted reCAPTCHA risk score, defaults to 0.5 */
   RECAPTCHA_MIN_SCORE?: string;
   /**
-   * When "true" (default in production), reCAPTCHA must be fully configured and
-   * verified – missing config fails the login closed. Set to "false" only for
-   * local development without reCAPTCHA credentials.
+   * Production always verifies reCAPTCHA and fails closed on missing config.
+   * Only localhost may bypass verification, with an explicit "false" value.
    */
   RECAPTCHA_ENFORCE?: string;
 
@@ -40,10 +39,7 @@ export interface Env {
   ADMIN_SECRET?: string;
   /** Google reCAPTCHA Enterprise assessment API key */
   RECAPTCHA_API_KEY?: string;
-  /** Set to "true" only when demo OAuth clients should be seeded */
-  ALLOW_DEMO_CLIENTS?: string;
-  /** Required when ALLOW_DEMO_CLIENTS is true and demo-confidential is seeded */
-  DEMO_CONFIDENTIAL_CLIENT_SECRET?: string;
+
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import type { Env, UserProps } from '../types';
+import { getUserById, getUserRoles } from '../db/queries';
 
 // ---------------------------------------------------------------------------
 // API handler – handles OAuth-token-protected routes
@@ -28,14 +29,30 @@ export class ApiHandler extends WorkerEntrypoint<Env> {
       });
     }
 
-    // GET /oauth/userinfo – standard OIDC UserInfo endpoint (RFC 9068)
+    // Read the token's actual scopes, including refresh-token downscoping and
+    // tokens issued before this hardening update. Grant props alone are insufficient.
     if (path === '/oauth/userinfo' && request.method === 'GET') {
+      const token = await this.env.OAUTH_PROVIDER.unwrapToken<UserProps>(
+        (request.headers.get('Authorization') ?? '').slice(7),
+      );
+      if (!token || token.userId !== props.userId) {
+        return Response.json({ error: 'invalid_token' }, { status: 401 });
+      }
+      const scopes = new Set(token.scope);
+      if (!scopes.has('openid')) {
+        return Response.json({ error: 'insufficient_scope' }, {
+          status: 403,
+          headers: { 'WWW-Authenticate': 'Bearer error="insufficient_scope", scope="openid"' },
+        });
+      }
+      const user = await getUserById(this.env.DB, props.userId);
+      if (!user) return Response.json({ error: 'invalid_token' }, { status: 401 });
       return Response.json(
         {
-          sub: props.userId,
-          preferred_username: props.username,
-          email: props.email,
-          roles: props.roles,
+          sub: user.id,
+          ...(scopes.has('profile') ? { preferred_username: user.username } : {}),
+          ...(scopes.has('email') ? { email: user.email, email_verified: false } : {}),
+          ...(scopes.has('roles') ? { roles: await getUserRoles(this.env.DB, user.id) } : {}),
         },
         {
           headers: {

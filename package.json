@@ -9,16 +9,20 @@
     "deploy": "npm run build:css && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply worker-oauth-db --local",
     "db:migrate": "wrangler d1 migrations apply worker-oauth-db --remote",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./tests/register.mjs --test tests/*.test.mjs"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241022.0",
+    "@cloudflare/workers-types": "^5.20260908.1",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.5.2",
-    "wrangler": "^3.60.3"
+    "wrangler": "^4.129.1"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.7.0",
     "argon2id": "^1.0.1"
+  },
+  "engines": {
+    "node": ">=22.13.1"
   }
 }
