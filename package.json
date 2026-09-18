@@ -4,9 +4,11 @@
   "description": "Private OAuth 2.1 provider for Cloudflare Workers",
   "private": true,
   "scripts": {
+    "build": "npm run build:version && npm run build:css",
+    "build:version": "node tools/build-version.mjs",
     "build:css": "tailwindcss -i ./src/styles/input.css -o ./public/styles.css --minify",
-    "dev": "npm run build:css && wrangler dev",
-    "deploy": "npm run build:css && wrangler deploy",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply worker-oauth-db --local",
     "db:migrate": "wrangler d1 migrations apply worker-oauth-db --remote",
     "typecheck": "tsc --noEmit",

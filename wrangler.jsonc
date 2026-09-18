@@ -6,6 +6,12 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+	// Stamp the deployment commit into src/generated/build-info.ts and build the
+	// CSS before bundling, so a bare `wrangler deploy` (Workers Builds, CI) shows
+	// the right revision on the login page.
+	"build": {
+		"command": "npm run build"
+	},
 	// Static HTML / CSS / JS assets (public/ directory)
 	"assets": {
 		"directory": "./public",

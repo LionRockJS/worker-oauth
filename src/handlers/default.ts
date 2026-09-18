@@ -17,6 +17,7 @@ import {
   buildClearCookieHeader,
 } from './session';
 import { loadTemplate, htmlResponse, escapeHtml } from './ui';
+import { BUILD_VERSION } from '../generated/build-info';
 import {
   rejectCrossOriginMutation,
   timingSafeEqualStrings,
@@ -503,7 +504,8 @@ async function renderLoginPage(
       .replaceAll('{{RECAPTCHA_SITE_KEY}}', siteKey)
       .replace('{{ERROR}}', escapeHtml(error))
       .replace('{{CSRF_TOKEN}}', escapeHtml(csrf.token))
-      .replace('{{AUTH_REQUEST_ID}}', escapeHtml(authRequestId)),
+      .replace('{{AUTH_REQUEST_ID}}', escapeHtml(authRequestId))
+      .replace('{{BUILD_VERSION}}', escapeHtml(BUILD_VERSION)),
     status,
   );
   if (csrf.setCookie) response.headers.append('Set-Cookie', csrf.setCookie);
